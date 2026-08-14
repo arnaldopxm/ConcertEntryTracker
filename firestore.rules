@@ -1,0 +1,113 @@
+rules_version = '2';
+
+// Reglas de seguridad de la taquilla.
+//
+// CÓMO DESPLEGARLAS
+//
+//   Opción A (consola web, sin instalar nada):
+//     1. Firebase console > Firestore Database > pestaña "Reglas".
+//     2. Pega el contenido de este archivo tal cual.
+//     3. Pulsa "Publicar".
+//
+//   Opción B (CLI):
+//     npm i -g firebase-tools
+//     firebase login
+//     firebase deploy --only firestore:rules --project TU_PROJECT_ID
+//   (necesitas un firebase.json con { "firestore": { "rules": "firestore.rules" } })
+//
+// MODELO DE ACCESO
+//
+//   No hay login: cualquiera con el eventId puede leer y escribir en ese evento.
+//   El eventId es aleatorio de 20 caracteres, así que funciona como una clave
+//   no adivinable. Se exige auth anónima solo para que el tráfico sea
+//   atribuible y para cerrar la puerta a peticiones sin sesión.
+//
+//   Nunca se borra nada: delete está prohibido en todas las colecciones.
+//   Las anulaciones son lógicas (campo `voided`).
+//
+//   Las entries se pueden seguir creando aunque el evento esté cerrado. Es
+//   deliberado: un móvil de puerta sin cobertura puede tener escrituras en cola
+//   cuando el tesorero cierra caja, y esas escrituras son dinero. Rechazarlas
+//   las perdería en silencio. El modo solo lectura tras el cierre lo aplica la
+//   interfaz; aquí solo se protege el documento del evento.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function conSesion() {
+      return request.auth != null;
+    }
+
+    function numeroNoNegativo(v) {
+      return v is number && v >= 0;
+    }
+
+    function talonarioValido(t) {
+      return t.keys().hasOnly(['delivered', 'soldCash', 'soldBizum', 'returned'])
+        && t.keys().hasAll(['delivered', 'soldCash', 'soldBizum', 'returned'])
+        && numeroNoNegativo(t.delivered)
+        && numeroNoNegativo(t.soldCash)
+        && numeroNoNegativo(t.soldBizum)
+        && numeroNoNegativo(t.returned);
+    }
+
+    function eventoValido(d) {
+      return d.keys().hasOnly(['name', 'date', 'price', 'barPct', 'tickets', 'createdAt', 'closedAt'])
+        && d.keys().hasAll(['name', 'date', 'price', 'barPct', 'tickets', 'createdAt', 'closedAt'])
+        && d.name is string && d.name.size() <= 120
+        && d.date is string && d.date.size() <= 40
+        && numeroNoNegativo(d.price)
+        && d.barPct is number && d.barPct >= 0 && d.barPct <= 100
+        && talonarioValido(d.tickets)
+        && d.createdAt is timestamp
+        && (d.closedAt == null || d.closedAt is timestamp);
+    }
+
+    match /events/{eventId} {
+
+      // Leer: cualquiera autenticado que conozca el eventId.
+      allow read: if conSesion();
+
+      // Crear: documento completo, bien tipado y abierto.
+      allow create: if conSesion()
+        && eventoValido(request.resource.data)
+        && request.resource.data.closedAt == null;
+
+      // Actualizar: solo mientras la caja siga abierta. La escritura que fija
+      // closedAt pasa porque en ese momento el documento almacenado todavía
+      // tiene closedAt == null. A partir de ahí, ninguna más.
+      allow update: if conSesion()
+        && eventoValido(request.resource.data)
+        && resource.data.closedAt == null
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if false;
+
+      match /entries/{entryId} {
+
+        function entryValida(d) {
+          return d.keys().hasOnly(['ts', 'method', 'hasTicket', 'note', 'voided'])
+            && d.keys().hasAll(['ts', 'method', 'hasTicket', 'note', 'voided'])
+            && d.ts is timestamp
+            && d.method in ['cash', 'bizum', 'already_paid', 'guest']
+            && d.hasTicket is bool
+            && (d.note == null || (d.note is string && d.note.size() <= 200))
+            && d.voided is bool;
+        }
+
+        allow read: if conSesion();
+
+        allow create: if conSesion()
+          && entryValida(request.resource.data)
+          && request.resource.data.voided == false;
+
+        // Lo único que se puede modificar de una entry es su anulación.
+        allow update: if conSesion()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided'])
+          && request.resource.data.voided is bool;
+
+        allow delete: if false;
+      }
+    }
+  }
+}

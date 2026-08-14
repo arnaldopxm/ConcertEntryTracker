@@ -1,0 +1,204 @@
+// views/door.js — vista de puerta.
+//
+// Una pantalla, sin scroll, sin menús y sin dinero: aquí solo se cuenta gente.
+// Dos toques por persona como máximo.
+
+import { el, toast, openSheet, closeSheet, vibrar } from '../app.js';
+
+const CONFIRMACION = {
+  cash: 'Registrado en efectivo',
+  bizum: 'Registrado en bizum',
+  already_paid: 'Registrado como ya pagada',
+  guest: 'Registrado como invitado'
+};
+
+export function mount(raiz, store) {
+  const contador = el('div.contador', { text: '0' });
+  const talonario = el('div.contador-pie', { text: ' ' });
+  const barraRed = el('div.barra-red', { hidden: true });
+  const avisoCerrado = el('div.barra-cerrado', { hidden: true, text: 'Caja cerrada. Ya no se registran entradas.' });
+
+  const botones = {
+    cash: botonPad('Efectivo', 'cash'),
+    bizum: botonPad('Bizum', 'bizum'),
+    already_paid: botonPad('Ya pagada', 'ya'),
+    guest: botonPad('Invitado', 'invitado')
+  };
+
+  const pad = el('div.pad', botones.cash, botones.bizum, botones.already_paid, botones.guest);
+
+  const vista = el('div.vista-puerta',
+    barraRed,
+    avisoCerrado,
+    el('div.puerta-top',
+      el('div.contador-caja', contador, el('div.contador-etiqueta', { text: 'asistentes' })),
+      talonario
+    ),
+    pad
+  );
+
+  raiz.append(vista);
+  // Sube los toasts por encima de la rejilla: aquí no pueden tapar botones.
+  document.body.classList.add('modo-puerta');
+
+  let estado = store.getState();
+  let ultimoTotal = null;
+
+  const desuscribir = store.subscribe((nuevo) => {
+    estado = nuevo;
+    pintar();
+  });
+
+  function pintar() {
+    const { totales, evento, cargando } = estado;
+    const cerrado = !!(evento && evento.closedAt);
+
+    // Contador
+    const asistentes = totales.asistentes;
+    contador.textContent = cargando && !evento ? '·' : String(asistentes);
+    if (ultimoTotal !== null && asistentes !== ultimoTotal) {
+      contador.classList.remove('bump');
+      void contador.offsetWidth; // reinicia la animación
+      contador.classList.add('bump');
+    }
+    ultimoTotal = asistentes;
+
+    // Talonario pendiente de aparecer
+    const enCirculacion = totales.entradasEnCirculacion;
+    const restantes = totales.entradasRestantes;
+    talonario.classList.toggle('alerta', restantes < 0);
+    if (!evento) {
+      talonario.textContent = ' ';
+    } else if (enCirculacion <= 0) {
+      talonario.textContent = 'Sin talonario repartido';
+    } else if (restantes > 0) {
+      talonario.textContent = `Quedan ${restantes} ${restantes === 1 ? 'entrada' : 'entradas'} por aparecer`;
+    } else if (restantes === 0) {
+      talonario.textContent = 'No quedan entradas por aparecer';
+    } else {
+      const extra = Math.abs(restantes);
+      talonario.textContent = `${extra} ${extra === 1 ? 'entrada' : 'entradas'} de más`;
+    }
+
+    // Estado de red
+    const sinRed = !estado.online;
+    const pendientes = estado.pendientes;
+    if (sinRed || pendientes > 0) {
+      barraRed.hidden = false;
+      barraRed.textContent = sinRed
+        ? 'Sin conexión. Se guarda en el móvil y se envía al recuperar señal.'
+        : `Enviando ${pendientes} ${pendientes === 1 ? 'registro' : 'registros'}…`;
+      barraRed.classList.toggle('offline', sinRed);
+    } else {
+      barraRed.hidden = true;
+    }
+
+    // Cierre de caja
+    avisoCerrado.hidden = !cerrado;
+    for (const boton of Object.values(botones)) boton.disabled = cerrado || !estado.existe;
+  }
+
+  function botonPad(texto, clase) {
+    const boton = el('button.pad-btn.pad-' + clase, { type: 'button' },
+      el('span.pad-texto', { text: texto })
+    );
+    return boton;
+  }
+
+  botones.cash.addEventListener('click', () => preguntarEntrada('cash'));
+  botones.bizum.addEventListener('click', () => preguntarEntrada('bizum'));
+  botones.already_paid.addEventListener('click', () => {
+    // Quien llega con la entrada ya pagada siempre trae papel en la mano.
+    if (estado.totales.entradasRestantes <= 0) avisarTalonario('already_paid', true);
+    else registrar('already_paid', true);
+  });
+  botones.guest.addEventListener('click', () => registrar('guest', false));
+
+  /** Paso 1: la única pregunta del flujo. */
+  function preguntarEntrada(metodo) {
+    const sinTalonario = estado.totales.entradasRestantes <= 0;
+
+    const contenido = el('div.sheet-contenido',
+      el('div.sheet-botones',
+        el('button.btn-sheet.btn-sheet-si', {
+          type: 'button',
+          text: 'Sí, traía entrada',
+          onClick: () => (sinTalonario ? avisarTalonario(metodo, true) : registrar(metodo, true))
+        }),
+        el('button.btn-sheet.btn-sheet-no', {
+          type: 'button',
+          text: 'No traía',
+          onClick: () => registrar(metodo, false)
+        })
+      )
+    );
+
+    openSheet('¿Traía entrada?', contenido);
+  }
+
+  /**
+   * Paso 2, solo cuando el talonario ya no da para más. Avisa, pide nota y
+   * deja continuar. Nunca bloquea: nadie se queda fuera por culpa de la app.
+   */
+  function avisarTalonario(metodo, hasTicket) {
+    const nota = el('input.campo', {
+      type: 'text',
+      maxLength: 200,
+      placeholder: 'Ej.: entrada repetida, la trajo un amigo…',
+      'aria-label': 'Nota'
+    });
+
+    const confirmar = el('button.btn-sheet.btn-sheet-peligro', {
+      type: 'button',
+      text: 'Registrar igualmente',
+      disabled: true,
+      onClick: () => registrar(metodo, hasTicket, nota.value.trim())
+    });
+
+    nota.addEventListener('input', () => {
+      confirmar.disabled = nota.value.trim().length === 0;
+    });
+
+    const contenido = el('div.sheet-contenido',
+      el('div.aviso',
+        el('p.aviso-titulo', { text: 'Hay más entradas de las repartidas' }),
+        el('p.aviso-texto', { text: 'El talonario en circulación ya está agotado. Escribe qué ha pasado y sigue adelante.' })
+      ),
+      nota,
+      el('div.sheet-botones',
+        confirmar,
+        el('button.btn-sheet.btn-sheet-no', { type: 'button', text: 'Cancelar', onClick: () => closeSheet() })
+      )
+    );
+
+    openSheet('Atención', contenido);
+    setTimeout(() => nota.focus(), 50);
+  }
+
+  function registrar(metodo, hasTicket, nota = null) {
+    if (estado.evento && estado.evento.closedAt) {
+      closeSheet();
+      toast('Caja cerrada. Habla con tesorería.');
+      return;
+    }
+
+    const id = store.addEntry({ method: metodo, hasTicket, note: nota });
+
+    closeSheet();
+    vibrar(30);
+
+    toast(CONFIRMACION[metodo], {
+      accion: 'Deshacer',
+      alAccionar: () => {
+        store.setVoided(id, true);
+        toast('Registro anulado', { ms: 2500 });
+      }
+    });
+  }
+
+  return function desmontar() {
+    desuscribir();
+    document.body.classList.remove('modo-puerta');
+    vista.remove();
+  };
+}
