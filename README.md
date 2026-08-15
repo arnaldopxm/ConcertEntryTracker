@@ -255,16 +255,118 @@ versión. **Si subes la versión de la URL en `store.js`, sube también la de
   tesorería abiertas a la vez y sincronizando en vivo, más el cambio de puesto,
   la agenda de eventos y el camino de actualización completo.
 
+### Reglas de Firestore
+
+Las reglas no se comprueban leyendo su texto: se **ejecutan** contra el emulador
+de Firebase. 31 tests que escriben exactamente lo que escribe la app y que
+intentan todo lo que no debería poder hacerse.
+
+```bash
+npm run test:reglas:install   # una vez
+npm run test:reglas           # levanta el emulador y ejecuta los tests
+```
+
+Necesita **Java** (lo exige el emulador de Firestore) y vive en
+[`tests/reglas/`](tests/reglas/) con su propio `package.json`:
+`@firebase/rules-unit-testing` exige una versión de `firebase` distinta de la
+que el repo clava para los tipos del CDN, y mezclarlas rompería el typecheck.
+Por eso **no** entra en `npm test`; en CI corre como job aparte.
+
+`tests/reglas/firestore.rules` es un enlace simbólico al de la raíz: hay un solo
+archivo de reglas y es el que se despliega.
+
+Si alguna vez la app dice "Firestore ha rechazado el acceso", estos tests
+responden a la pregunta que importa: ¿son las reglas del repo, o las que hay
+publicadas en el proyecto? Si pasan en verde, el problema está en la consola.
+
 ### Lo que los tests NO cubren
 
 La cola de escrituras offline es del SDK de Firestore, y en los tests el SDK
 está sustituido por un doble. `tests/e2e/offline.test.js` comprueba nuestra
 parte (avisar sin estorbar, no bloquear el registro), pero **que tres entradas
-hechas en modo avión lleguen al recuperar señal hay que probarlo en un móvil
-real**. Es el punto que más probablemente falle en el bar.
+hechas en modo avión lleguen al recuperar señal hay que probarlo en móviles
+reales**. Abajo está el protocolo.
 
-Tampoco se ejecutan las reglas de Firestore: se comprueba su contenido, no su
-comportamiento. Para eso haría falta el emulador de Firebase.
+## Probar la cola offline con dos móviles
+
+Es lo único que ningún test automático puede darte, y es lo que más probablemente
+falle en un bar. Media hora antes, con calma.
+
+### Antes de empezar (importante)
+
+La sesión anónima y la caché tienen que existir **antes** de quedarte sin red.
+En cada móvil, con cobertura:
+
+1. Abre su enlace (puerta en uno, tesorería en otro).
+2. Espera a ver el contador o el facturado: eso significa que hay sesión, reglas
+   OK y datos cargados.
+3. Instálala: compartir → **Añadir a pantalla de inicio**. Ábrela desde el icono.
+4. Registra una persona de prueba y anúlala desde tesorería. Si eso funciona
+   online, la base está lista.
+
+Un móvil que nunca ha cargado la app con red **no va a funcionar sin ella**: no
+tiene ni sesión ni caché. No hay forma de esquivar esto.
+
+### Prueba 1: la cola básica
+
+1. En el móvil de puerta, **modo avión**. Aparece la barra fina: *"Sin conexión.
+   Se guarda en el móvil y se envía al recuperar señal."*
+2. Registra **tres personas** con métodos distintos (efectivo con entrada, bizum
+   sin entrada, invitado). El contador tiene que subir a 3 igual que siempre.
+3. En el móvil de tesorería (con red), comprueba que **NO** han aparecido. Es lo
+   correcto: están en la cola del otro móvil.
+4. Quita el modo avión. En la puerta verás un momento *"Enviando 3 registros…"*.
+5. En tesorería tienen que aparecer los tres en segundos, con su hora real (la de
+   cuando los registraste, no la de ahora).
+
+**Si no llegan en un minuto:** cierra la app de puerta del todo y vuelve a
+abrirla con red. La cola vive en el almacenamiento del móvil, no en memoria, así
+que debería salir sola.
+
+### Prueba 2: arranque en frío sin red
+
+1. Modo avión en la puerta.
+2. **Cierra la app del todo** (deslizar hacia arriba en el selector de apps).
+3. Ábrela desde el icono.
+
+Tiene que abrir y dejarte registrar. Si te sale una pantalla en blanco o un error
+del navegador, el service worker no tenía el shell cacheado: vuelve a abrirla con
+red y espera unos segundos antes de repetir.
+
+### Prueba 3: los dos a la vez sin cobertura
+
+Es el escenario real del bar: se cae la cobertura para todos.
+
+1. Modo avión en **los dos**.
+2. Registra dos personas en la puerta.
+3. En tesorería, cambia el precio y anula uno de los movimientos que ya tenía.
+4. Quita el modo avión en los dos.
+5. Todo tiene que converger: el precio nuevo, la anulación y las dos personas.
+
+### Prueba 4: cerrar caja con la puerta descolgada
+
+1. Modo avión en la puerta. Registra dos personas.
+2. En tesorería (con red), **cierra la caja**.
+3. Quita el modo avión en la puerta.
+
+Las dos personas tienen que entrar igual, aunque la caja esté cerrada. Es
+deliberado: rechazarlas perdería dinero en silencio. Después la puerta se entera
+del cierre y deja de aceptar registros.
+
+### Qué mirar mientras tanto
+
+| Lo que ves | Qué significa |
+|---|---|
+| Barra ámbar "Sin conexión" | El navegador no ve red. Se sigue guardando en local. |
+| "Enviando N registros…" | Hay cola pendiente de confirmar. Debería vaciarse en segundos. |
+| El contador no sube al pulsar | Esto **no** es normal. Mira si hay panel rojo con el motivo. |
+| Panel rojo "Firestore ha rechazado" | Problema de reglas o de sesión, no de red. |
+
+### Plan B
+
+Si algo de esto falla y no da tiempo a arreglarlo, imprime una hoja de conteo en
+papel y cuadra a mano. La app registra, no cobra: perder la app no pierde dinero,
+perder la cuenta sí.
 
 ## Versiones y actualizaciones
 

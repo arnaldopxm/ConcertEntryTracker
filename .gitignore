@@ -2,6 +2,9 @@
 # tal cual desde GitHub Pages.
 node_modules/
 
+# Registros del emulador de Firestore
+*-debug.log
+
 # Salidas de herramientas
 *.tsbuildinfo
 test-results/

@@ -6,5 +6,6 @@
     "moduleResolution": "nodenext",
     "types": ["node"]
   },
-  "include": ["tests/**/*.js", "types/*.d.ts", "calc.js", "qr.js"]
+  "include": ["tests/**/*.js", "scripts/*.mjs", "types/*.d.ts", "calc.js", "qr.js"],
+  "exclude": ["tests/reglas/**"]
 }
