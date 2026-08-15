@@ -90,6 +90,41 @@ test('navegación', async (t) => {
     }
   });
 
+  await t.test('se puede quitar un evento de la lista', async () => {
+    await pagina.goto(base, { waitUntil: 'networkidle' });
+    await pagina.waitForSelector('.eventos');
+
+    const antes = await pagina.$$eval('.evento', (ns) => ns.length);
+    await pagina.click('.evento .evento-quitar');
+    await pagina.waitForFunction(
+      (esperado) => document.querySelectorAll('.evento').length === esperado,
+      antes - 1
+    );
+
+    // Y desaparece también del almacenamiento, no solo de la pantalla.
+    const guardados = await pagina.evaluate(
+      () => JSON.parse(localStorage.getItem('taquilla:mis-eventos') || '[]').length
+    );
+    assert.equal(guardados, antes - 1);
+  });
+
+  await t.test('quitar se puede deshacer', async () => {
+    await pagina.click('.toast-accion');
+    await pagina.waitForSelector('.evento');
+
+    const guardados = await pagina.evaluate(
+      () => JSON.parse(localStorage.getItem('taquilla:mis-eventos') || '[]').length
+    );
+    assert.ok(guardados >= 1, 'el atajo vuelve a la agenda');
+  });
+
+  await t.test('quitar no borra el evento de la base de datos', async () => {
+    // El enlace tiene que seguir funcionando: la agenda es solo un atajo local.
+    await pagina.goto(enlaces.mesa, { waitUntil: 'networkidle' });
+    await pagina.waitForSelector('.saldo');
+    assert.ok(!(await pagina.$('.problema:not([hidden])')), 'el evento sigue existiendo');
+  });
+
   await t.test('un enlace roto no ensucia la agenda', async () => {
     await pagina.goto(`${base}#e=otroQueNoExiste000&r=desk`, { waitUntil: 'networkidle' });
     await pagina.waitForSelector('.problema:not([hidden])');

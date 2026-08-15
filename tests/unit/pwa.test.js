@@ -141,6 +141,22 @@ test('index.html solo usa rutas relativas', () => {
   }
 });
 
+test('se reserva el hueco de la barra de estado y la isla dinámica', () => {
+  // index.html pide viewport-fit=cover, así que el contenido llega hasta el
+  // borde físico: sin estos paddings, el título se mete debajo del reloj.
+  const html = leer('index.html');
+  assert.match(html, /viewport-fit=cover/);
+
+  const css = leer('styles.css');
+  for (const contenedor of ['.pantalla', '.vista-puerta', '.vista-mesa']) {
+    const bloque = new RegExp(`\\${contenedor} \\{[^}]*safe-area-inset-top[^}]*\\}`);
+    assert.match(css, bloque, `${contenedor} no reserva el hueco superior`);
+  }
+
+  // Y abajo, el de la barra de gestos.
+  assert.match(css, /safe-area-inset-bottom/);
+});
+
 test('index.html declara el tema oscuro y el viewport de móvil', () => {
   const html = leer('index.html');
   assert.match(html, /name="theme-color" content="#0B0B0F"/);

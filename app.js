@@ -450,24 +450,69 @@ function tarjetaMisEventos() {
   const eventos = misEventos.listar();
   if (!eventos.length) return null;
 
-  return el('section.tarjeta',
+  const lista = el('div.eventos');
+  const tarjeta = el('section.tarjeta',
     el('h2.tarjeta-titulo', { text: 'Tus eventos' }),
-    el('div.eventos',
-      eventos.map((evento) =>
-        el('div.evento',
-          el('div.evento-cabecera',
-            el('div.evento-nombre', { text: evento.name || 'Evento sin nombre' }),
-            evento.date ? el('div.evento-fecha', { text: fmtFecha(evento.date) }) : null
-          ),
-          el('div.acciones-fila',
-            el('a.btn.btn-secundario', { href: enlaceDe(evento.id, 'door'), text: 'Puerta' }),
-            el('a.btn.btn-primario', { href: enlaceDe(evento.id, 'desk'), text: 'Tesorería' })
-          )
-        )
-      )
-    ),
+    lista,
     el('p.pie', { text: 'Guardados solo en este móvil. Los datos viven en Firestore.' })
   );
+
+  for (const evento of eventos) lista.append(filaDeEvento(evento, lista, tarjeta));
+
+  return tarjeta;
+}
+
+/**
+ * @param {import('./mis-eventos.js').EventoLocal} evento
+ * @param {HTMLElement} lista
+ * @param {HTMLElement} tarjeta
+ * @returns {HTMLElement}
+ */
+function filaDeEvento(evento, lista, tarjeta) {
+  const fila = el('div.evento',
+    el('div.evento-cabecera',
+      el('div',
+        el('div.evento-nombre', { text: evento.name || 'Evento sin nombre' }),
+        evento.date ? el('div.evento-fecha', { text: fmtFecha(evento.date) }) : null
+      ),
+      boton('button.evento-quitar', {
+        text: 'Quitar',
+        'aria-label': `Quitar ${evento.name || 'este evento'} de la lista`,
+        onClick: () => quitarDeLaLista(evento, fila, lista, tarjeta)
+      })
+    ),
+    el('div.acciones-fila',
+      el('a.btn.btn-secundario', { href: enlaceDe(evento.id, 'door'), text: 'Puerta' }),
+      el('a.btn.btn-primario', { href: enlaceDe(evento.id, 'desk'), text: 'Tesorería' })
+    )
+  );
+  return fila;
+}
+
+/**
+ * Quita el atajo de este móvil. No borra nada en Firestore: el evento sigue
+ * ahí y su enlace sigue funcionando, por eso no se pide confirmación y basta
+ * con poder deshacerlo.
+ *
+ * @param {import('./mis-eventos.js').EventoLocal} evento
+ * @param {HTMLElement} fila
+ * @param {HTMLElement} lista
+ * @param {HTMLElement} tarjeta
+ */
+function quitarDeLaLista(evento, fila, lista, tarjeta) {
+  const contenedor = tarjeta.parentElement;
+  misEventos.olvidar(evento.id);
+  fila.remove();
+  if (!lista.querySelector('.evento')) tarjeta.remove();
+
+  toast('Quitado de la lista', {
+    accion: 'Deshacer',
+    alAccionar: () => {
+      misEventos.recordar(evento);
+      if (!tarjeta.isConnected && contenedor) contenedor.append(tarjeta);
+      lista.prepend(fila);
+    }
+  });
 }
 
 /**

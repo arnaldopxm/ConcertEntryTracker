@@ -98,7 +98,7 @@ input {
 /* --- Pantallas genéricas (arranque, errores, enlaces) --------------------- */
 
 .pantalla {
-  padding: 20px 14px calc(28px + env(safe-area-inset-bottom));
+  padding: calc(20px + env(safe-area-inset-top)) 14px calc(28px + env(safe-area-inset-bottom));
   max-width: 560px;
   margin: 0 auto;
 }
@@ -106,7 +106,7 @@ input {
 /* En pantallas cortas se recorta el aire para que el formulario entre entero. */
 @media (max-height: 780px) {
   .pantalla {
-    padding-top: 12px;
+    padding-top: calc(12px + env(safe-area-inset-top));
   }
 
   .pantalla .tarjeta {
@@ -354,10 +354,15 @@ input {
 
 /* --- Vista de puerta ----------------------------------------------------- */
 
+/* El viewport va a pantalla completa (viewport-fit=cover), así que hay que
+   reservar a mano el hueco de la isla dinámica y de la barra de estado. Con
+   box-sizing: border-box el padding sale de los 100dvh y la rejilla no se
+   desborda por abajo. */
 .vista-puerta {
   display: flex;
   flex-direction: column;
   height: 100dvh;
+  padding-top: env(safe-area-inset-top);
   overflow: hidden;
 }
 
@@ -466,6 +471,7 @@ input {
 .vista-mesa {
   max-width: 560px;
   margin: 0 auto;
+  padding-top: env(safe-area-inset-top);
   padding-bottom: calc(28px + env(safe-area-inset-bottom));
 }
 
@@ -753,7 +759,24 @@ input {
 }
 
 .evento-cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 10px;
+}
+
+.evento-quitar {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--borde);
+  background: var(--tarjeta-alta);
+  color: var(--texto-2);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .evento-nombre {
