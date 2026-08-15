@@ -25,7 +25,7 @@
 /** El scope de un service worker no es Window: TS necesita que se lo digamos. */
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
 
-const CACHE = 'taquilla-1.0.0-99debb25cafd';
+const CACHE = 'taquilla-1.0.0-a1fb036a3bff';
 
 const SHELL = [
   './',

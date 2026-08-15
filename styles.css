@@ -844,12 +844,21 @@ input {
   gap: 12px;
 }
 
+/* Vale tanto para <button> como para <a>: en el panel de cambio de puesto las
+   opciones son enlaces de verdad (se pueden abrir en otra pestaña), y sin esto
+   salían como un enlace subrayado pegado a la esquina. */
 .btn-sheet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 72px;
+  padding: 0 18px;
   border: 0;
   border-radius: var(--radio-s);
   font-size: 20px;
   font-weight: 800;
+  text-align: center;
+  text-decoration: none;
   cursor: pointer;
   transition: transform var(--rapido) ease;
 }

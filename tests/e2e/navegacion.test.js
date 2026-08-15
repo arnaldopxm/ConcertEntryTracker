@@ -27,7 +27,64 @@ test('navegación', async (t) => {
     assert.ok(pagina.url().includes('r=desk'));
   });
 
+  await t.test('las opciones del panel parecen botones, no enlaces sueltos', async () => {
+    // Regresión: eran <a> con clase de botón, y .btn-sheet no centraba ni
+    // quitaba el subrayado, así que salía el texto arriba a la izquierda.
+    await pagina.click('.cambiar-puesto');
+    await pagina.waitForSelector('.sheet');
+
+    const estilo = await pagina.$eval('.sheet a.btn-sheet', (n) => {
+      const s = getComputedStyle(n);
+      return { display: s.display, justify: s.justifyContent, deco: s.textDecorationLine };
+    });
+    assert.equal(estilo.display, 'flex');
+    assert.equal(estilo.justify, 'center');
+    assert.equal(estilo.deco, 'none');
+
+    // Y el texto queda centrado dentro de su caja, no arrimado a un borde.
+    const { boton, texto } = await pagina.$eval('.sheet a.btn-sheet', (n) => {
+      const rango = document.createRange();
+      rango.selectNodeContents(n);
+      return {
+        boton: n.getBoundingClientRect().toJSON(),
+        texto: rango.getBoundingClientRect().toJSON()
+      };
+    });
+    const centroBoton = boton.x + boton.width / 2;
+    const centroTexto = texto.x + texto.width / 2;
+    assert.ok(Math.abs(centroBoton - centroTexto) < 2, 'el texto no está centrado');
+    assert.ok(
+      Math.abs((boton.y + boton.height / 2) - (texto.y + texto.height / 2)) < 2,
+      'el texto no está centrado verticalmente'
+    );
+
+    await pagina.click('.btn-sheet-no');
+    await pagina.waitForSelector('.sheet', { state: 'detached' });
+  });
+
+  await t.test('ninguna pantalla se desborda a lo ancho', async () => {
+    for (const url of [base, enlaces.puerta, enlaces.mesa]) {
+      await pagina.goto(url, { waitUntil: 'networkidle' });
+      const desbordan = await pagina.evaluate(() => {
+        const ancho = document.documentElement.clientWidth;
+        return {
+          scroll: document.documentElement.scrollWidth,
+          ancho,
+          culpables: [...document.querySelectorAll('*')]
+            .filter((n) => n.getBoundingClientRect().right > ancho + 1)
+            .slice(0, 3)
+            .map((n) => n.className)
+        };
+      });
+      assert.equal(desbordan.scroll, desbordan.ancho, `${url} desborda: ${desbordan.culpables}`);
+    }
+    await pagina.goto(enlaces.puerta, { waitUntil: 'networkidle' });
+    await pagina.waitForSelector('.pad-btn');
+  });
+
   await t.test('y desde tesorería se vuelve a la puerta', async () => {
+    await pagina.goto(enlaces.mesa, { waitUntil: 'networkidle' });
+    await pagina.waitForSelector('.saldo');
     await pagina.click('.cambiar-puesto');
     await pagina.waitForSelector('.sheet');
     await pagina.click('a:has-text("Ir a la puerta")');
