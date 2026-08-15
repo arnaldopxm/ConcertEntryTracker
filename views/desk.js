@@ -5,6 +5,7 @@
 // está todo el dinero, la configuración del evento y el cierre de caja.
 
 import { el, boton, input, fmtEuros, fmtHora, toast, openSheet, closeSheet, copiar, enlaceDe } from '../app.js';
+import { explicarError } from '../errores.js';
 import { toCSV, ETIQUETA_METODO } from '../store.js';
 
 /** @typedef {import('../store.js').Store} Store */
@@ -21,6 +22,7 @@ export function mount(raiz, store) {
   const barraRed = el('div.barra-red', { hidden: true });
   const avisoCerrado = el('div.barra-cerrado', { hidden: true, text: 'Caja cerrada. Solo lectura.' });
   const nombreEvento = el('div.desk-evento', { text: ' ' });
+  const problema = el('div.problema', { hidden: true });
   const facturado = el('div.saldo', { text: fmtEuros(0) });
 
   // --- Tarjetas de desglose
@@ -137,7 +139,11 @@ export function mount(raiz, store) {
     barraRed,
     avisoCerrado,
     el('header.desk-cabecera',
-      nombreEvento,
+      el('div.desk-barra',
+        nombreEvento,
+        boton('button.cambiar-puesto', { text: 'Tesorería', 'aria-label': 'Cambiar de puesto', onClick: abrirCambioDePuesto })
+      ),
+      problema,
       el('div.saldo-etiqueta', { text: 'Facturado' }),
       facturado
     ),
@@ -161,8 +167,10 @@ export function mount(raiz, store) {
     const { evento, totales, entries } = estado;
     const cerrado = !!(evento && evento.closedAt);
 
+    pintarProblema();
+
     if (!estado.existe && !estado.cargando) {
-      nombreEvento.textContent = 'Evento no encontrado';
+      nombreEvento.textContent = 'Evento no disponible';
     } else if (evento) {
       nombreEvento.textContent = [evento.name, formatearFecha(evento.date)].filter(Boolean).join(' · ');
     }
@@ -215,6 +223,51 @@ export function mount(raiz, store) {
     }
 
     pintarMovimientos(entries, cerrado);
+  }
+
+  function pintarProblema() {
+    const hayFallo = !!estado.error || (!estado.existe && !estado.cargando);
+    if (!hayFallo) {
+      problema.hidden = true;
+      return;
+    }
+
+    const explicacion = estado.error
+      ? explicarError(estado.error)
+      : {
+          titulo: 'Este evento no existe',
+          detalle: 'El enlace apunta a un evento que no está en la base de datos.',
+          pasos: []
+        };
+
+    problema.hidden = false;
+    problema.textContent = '';
+    problema.append(
+      el('p.problema-titulo', { text: explicacion.titulo }),
+      el('p.problema-detalle', { text: explicacion.detalle })
+    );
+    if (explicacion.pasos.length) {
+      problema.append(el('ol.problema-pasos', explicacion.pasos.map((paso) => el('li', { text: paso }))));
+    }
+    problema.append(
+      boton('button.btn.btn-secundario', { text: 'Reintentar', onClick: () => location.reload() })
+    );
+  }
+
+  function abrirCambioDePuesto() {
+    openSheet('Cambiar de puesto',
+      el('div.sheet-contenido',
+        el('p.parrafo', { text: 'Estás en tesorería. La puerta solo cuenta gente, sin dinero a la vista.' }),
+        el('div.sheet-botones',
+          el('a.btn-sheet.btn-sheet-si', {
+            href: enlaceDe(store.eventId, 'door'),
+            text: 'Ir a la puerta',
+            onClick: () => closeSheet()
+          }),
+          boton('button.btn-sheet.btn-sheet-no', { text: 'Seguir en tesorería', onClick: () => closeSheet() })
+        )
+      )
+    );
   }
 
   /**

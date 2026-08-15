@@ -16,7 +16,7 @@
 /** El scope de un service worker no es Window: TS necesita que se lo digamos. */
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
 
-const CACHE = 'taquilla-v2';
+const CACHE = 'taquilla-v3';
 
 const SHELL = [
   './',
@@ -24,6 +24,8 @@ const SHELL = [
   './app.js',
   './store.js',
   './calc.js',
+  './errores.js',
+  './mis-eventos.js',
   './qr.js',
   './firebase-config.js',
   './views/door.js',

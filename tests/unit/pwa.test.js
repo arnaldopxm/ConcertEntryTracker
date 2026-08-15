@@ -46,6 +46,37 @@ test('los iconos del manifest existen y cubren los tamaños que pide una PWA', (
   }
 });
 
+/**
+ * Sigue los imports desde app.js y devuelve todos los módulos locales que la
+ * app acaba cargando, estáticos y dinámicos. Así la lista no se escribe a mano
+ * y añadir un módulo nuevo no puede pasar desapercibido.
+ *
+ * @returns {Set<string>} rutas relativas a la raíz, en formato './x.js'
+ */
+function modulosDeLaApp() {
+  const pendientes = ['app.js'];
+  const vistos = new Set();
+
+  while (pendientes.length) {
+    const actual = pendientes.pop();
+    if (!actual || vistos.has(actual)) continue;
+    vistos.add(actual);
+
+    const codigo = leer(actual);
+    const referencias = [
+      ...codigo.matchAll(/from\s+'(\.[^']+)'/g),
+      ...codigo.matchAll(/import\('(\.[^']+)'\)/g)
+    ].map((m) => m[1]);
+
+    for (const ref of referencias) {
+      const resuelto = path.normalize(path.join(path.dirname(actual), ref)).replace(/\\/g, '/');
+      pendientes.push(resuelto);
+    }
+  }
+
+  return new Set([...vistos].map((m) => './' + m));
+}
+
 test('el service worker precachea todos los módulos de la app', () => {
   const sw = leer('sw.js');
   const lista = /const SHELL = \[([\s\S]*?)\];/.exec(sw);
@@ -53,11 +84,15 @@ test('el service worker precachea todos los módulos de la app', () => {
 
   const precacheados = [...lista[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
 
-  // Todo módulo que la app carga en tiempo de ejecución tiene que estar.
-  const modulos = ['./app.js', './store.js', './calc.js', './qr.js', './firebase-config.js',
-    './views/door.js', './views/desk.js', './styles.css', './index.html', './manifest.webmanifest'];
-  for (const modulo of modulos) {
-    assert.ok(precacheados.includes(modulo), `sw.js no precachea ${modulo}`);
+  for (const modulo of modulosDeLaApp()) {
+    assert.ok(
+      precacheados.includes(modulo),
+      `sw.js no precachea ${modulo}: la app instalada dejaría de abrir sin cobertura`
+    );
+  }
+
+  for (const recurso of ['./index.html', './styles.css', './manifest.webmanifest']) {
+    assert.ok(precacheados.includes(recurso), `sw.js no precachea ${recurso}`);
   }
 
   // Y todo lo precacheado tiene que existir de verdad.
@@ -179,6 +214,35 @@ test('la app no usa localStorage para el estado de negocio', () => {
       leer(archivo),
       /localStorage|sessionStorage/,
       `${archivo} usa almacenamiento local: la fuente de verdad es Firestore`
+    );
+  }
+});
+
+test('la agenda local es el único sitio con localStorage, y solo guarda atajos', () => {
+  const agenda = leer('mis-eventos.js');
+  assert.match(agenda, /localStorage/);
+
+  // Ni euros, ni asistentes, ni talonario: si aparece algo de eso, la fuente de
+  // verdad ha dejado de ser Firestore sin que nadie lo decidiera.
+  assert.doesNotMatch(
+    agenda,
+    /price|barPct|tickets|entries|facturado|asistentes|soldCash|soldBizum/,
+    'la agenda local no puede guardar estado de negocio'
+  );
+});
+
+test('toda escritura rechazada acaba en el estado, no solo en la consola', () => {
+  // Solo las escrituras: el fallo de login sin red sí se traga a propósito,
+  // porque se reintenta al recuperar señal.
+  const store = leer('store.js');
+  const escrituras = [...store.matchAll(/\b(setDoc|updateDoc)\(/g)];
+  assert.ok(escrituras.length >= 4, 'crear evento, registrar, anular, configurar y cerrar');
+
+  for (const escritura of escrituras) {
+    const cuerpo = store.slice(escritura.index || 0, (escritura.index || 0) + 320);
+    assert.ok(
+      /\.catch\(fallo\)|throw err/.test(cuerpo),
+      `escritura sin propagar el rechazo: ${cuerpo.split('\n')[0]}`
     );
   }
 });

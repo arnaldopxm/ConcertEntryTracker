@@ -4,7 +4,8 @@
 // Una pantalla, sin scroll, sin menús y sin dinero: aquí solo se cuenta gente.
 // Dos toques por persona como máximo.
 
-import { el, boton, input, toast, openSheet, closeSheet, vibrar } from '../app.js';
+import { el, boton, input, toast, openSheet, closeSheet, vibrar, enlaceDe } from '../app.js';
+import { explicarError } from '../errores.js';
 
 /** @typedef {import('../store.js').Store} Store */
 /** @typedef {import('../calc.js').Metodo} Metodo */
@@ -38,12 +39,24 @@ export function mount(raiz, store) {
 
   const pad = el('div.pad', botones.cash, botones.bizum, botones.already_paid, botones.guest);
 
+  // Botón pequeño y arriba del todo: cambiar de puesto no puede competir con la
+  // rejilla, pero tampoco puede ser imposible.
+  const cambiarPuesto = boton('button.cambiar-puesto', {
+    text: 'Puerta',
+    'aria-label': 'Cambiar de puesto',
+    onClick: abrirCambioDePuesto
+  });
+
+  const problema = el('div.problema', { hidden: true });
+
   const vista = el('div.vista-puerta',
     barraRed,
     avisoCerrado,
+    el('div.puerta-barra', cambiarPuesto),
     el('div.puerta-top',
       el('div.contador-caja', contador, el('div.contador-etiqueta', { text: 'asistentes' })),
-      talonario
+      talonario,
+      problema
     ),
     pad
   );
@@ -107,7 +120,72 @@ export function mount(raiz, store) {
 
     // Cierre de caja
     avisoCerrado.hidden = !cerrado;
-    for (const boton of Object.values(botones)) boton.disabled = cerrado || !estado.existe;
+
+    // Si el evento no está disponible, hay que decir por qué. Un teclado de
+    // botones apagados sin explicación es lo peor que puede pasar en la puerta.
+    const disponible = estado.existe;
+    pintarProblema(disponible, cargando);
+
+    for (const boton of Object.values(botones)) boton.disabled = cerrado || !disponible;
+  }
+
+  /**
+   * @param {string} texto
+   * @param {string} clase
+   * @returns {HTMLButtonElement}
+   */
+  /**
+   * @param {boolean} disponible
+   * @param {boolean} cargando
+   */
+  function pintarProblema(disponible, cargando) {
+    if (disponible || cargando) {
+      problema.hidden = true;
+      vista.classList.remove('con-problema');
+      return;
+    }
+
+    // Sin evento, la rejilla no sirve para nada: fuera. Un teclado de botones
+    // apagados solo confunde a quien está de pie en la puerta.
+    vista.classList.add('con-problema');
+
+    const explicacion = estado.error
+      ? explicarError(estado.error)
+      : {
+          titulo: 'Este evento no existe',
+          detalle: 'El enlace apunta a un evento que no está en la base de datos.',
+          pasos: ['Comprueba que has abierto el enlace correcto.', 'Si lo acabas de crear, revisa que se guardó.']
+        };
+
+    problema.hidden = false;
+    problema.textContent = '';
+    problema.append(
+      el('p.problema-titulo', { text: explicacion.titulo }),
+      el('p.problema-detalle', { text: explicacion.detalle })
+    );
+    if (explicacion.pasos.length) {
+      problema.append(el('ol.problema-pasos', explicacion.pasos.map((paso) => el('li', { text: paso }))));
+    }
+    problema.append(
+      boton('button.btn.btn-secundario', { text: 'Reintentar', onClick: () => location.reload() })
+    );
+  }
+
+  /** Cambio de puesto en dos toques, para que no pase por un roce. */
+  function abrirCambioDePuesto() {
+    openSheet('Cambiar de puesto',
+      el('div.sheet-contenido',
+        el('p.parrafo', { text: 'Estás en la puerta. Tesorería enseña el dinero y el cuadre.' }),
+        el('div.sheet-botones',
+          el('a.btn-sheet.btn-sheet-si', {
+            href: enlaceDe(store.eventId, 'desk'),
+            text: 'Ir a tesorería',
+            onClick: () => closeSheet()
+          }),
+          boton('button.btn-sheet.btn-sheet-no', { text: 'Seguir en la puerta', onClick: () => closeSheet() })
+        )
+      )
+    );
   }
 
   /**

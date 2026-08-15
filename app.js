@@ -8,6 +8,8 @@
 
 import { initApp, openEvent, crearEvento, nuevoEventId } from './store.js';
 import { qrSVG } from './qr.js';
+import { explicarError } from './errores.js';
+import * as misEventos from './mis-eventos.js';
 
 /**
  * @param {string} id
@@ -308,6 +310,15 @@ async function enrutar() {
   if (rol !== 'door' && rol !== 'desk') return pantallaRol(eventId);
 
   tiendaActiva = openEvent(eventId);
+
+  // La agenda solo apunta eventos que existen de verdad, con su nombre ya
+  // cargado. Así un enlace roto no ensucia la lista.
+  const dejarDeMirar = tiendaActiva.subscribe((estado) => {
+    if (!estado.existe || !estado.evento) return;
+    misEventos.recordar({ id: eventId, name: estado.evento.name, date: estado.evento.date });
+    dejarDeMirar();
+  });
+
   const modulo = rol === 'door'
     ? await import('./views/door.js')
     : await import('./views/desk.js');
@@ -378,8 +389,10 @@ function pantallaArranque() {
     onSubmit: (ev) => {
       ev.preventDefault();
       const eventId = nuevoEventId();
-      crearEvento(eventId, {
-        name: campos.name.value.trim() || 'Concierto',
+      const nombre = campos.name.value.trim() || 'Concierto';
+
+      const { guardado } = crearEvento(eventId, {
+        name: nombre,
         date: campos.date.value,
         price: campos.price.value,
         barPct: campos.barPct.value,
@@ -390,6 +403,13 @@ function pantallaArranque() {
           returned: 0
         }
       });
+
+      misEventos.recordar({ id: eventId, name: nombre, date: campos.date.value });
+
+      // No se espera al servidor para navegar, pero si rechaza hay que decirlo:
+      // un evento que no se guardó deja la puerta muerta sin explicación.
+      guardado.catch((err) => mostrarFalloDeGuardado(err));
+
       limpiar();
       pantallaEnlaces(eventId);
     }
@@ -410,9 +430,65 @@ function pantallaArranque() {
         el('h1.titulo', { text: 'Taquilla' }),
         el('p.parrafo', { text: 'Crea el evento y reparte los dos enlaces: uno para la puerta y otro para tesorería.' }),
         formulario
-      )
+      ),
+      tarjetaMisEventos()
     )
   );
+}
+
+/**
+ * Agenda local de eventos creados o abiertos en este móvil. No es la fuente de
+ * verdad de nada: solo evita tener que guardar los enlaces a mano.
+ *
+ * @returns {HTMLElement|null}
+ */
+function tarjetaMisEventos() {
+  const eventos = misEventos.listar();
+  if (!eventos.length) return null;
+
+  return el('section.tarjeta',
+    el('h2.tarjeta-titulo', { text: 'Tus eventos' }),
+    el('div.eventos',
+      eventos.map((evento) =>
+        el('div.evento',
+          el('div.evento-cabecera',
+            el('div.evento-nombre', { text: evento.name || 'Evento sin nombre' }),
+            evento.date ? el('div.evento-fecha', { text: fmtFecha(evento.date) }) : null
+          ),
+          el('div.acciones-fila',
+            el('a.btn.btn-secundario', { href: enlaceDe(evento.id, 'door'), text: 'Puerta' }),
+            el('a.btn.btn-primario', { href: enlaceDe(evento.id, 'desk'), text: 'Tesorería' })
+          )
+        )
+      )
+    ),
+    el('p.pie', { text: 'Guardados solo en este móvil. Los datos viven en Firestore.' })
+  );
+}
+
+/**
+ * Fecha ISO a formato de aquí. Si no es ISO, se enseña tal cual.
+ * @param {string} iso
+ * @returns {string}
+ */
+function fmtFecha(iso) {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : iso;
+}
+
+/** @param {unknown} err */
+function mostrarFalloDeGuardado(err) {
+  const explicacion = explicarError(err);
+  const aviso = el('div.problema',
+    el('p.problema-titulo', { text: 'El evento no se ha guardado' }),
+    el('p.problema-detalle', { text: explicacion.detalle }),
+    explicacion.pasos.length
+      ? el('ol.problema-pasos', explicacion.pasos.map((paso) => el('li', { text: paso })))
+      : null
+  );
+  const pantalla = raiz.querySelector('.pantalla');
+  if (pantalla) pantalla.prepend(aviso);
+  else raiz.prepend(aviso);
 }
 
 /**

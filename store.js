@@ -178,8 +178,13 @@ export function crearEvento(eventId, { name, date, price, barPct, tickets }) {
     createdAt: Timestamp.now(),
     closedAt: null
   };
-  setDoc(ref, documento).catch((err) => console.error('Error creando evento:', err));
-  return documento;
+  // Se devuelve la promesa para que la pantalla pueda enseñar el rechazo, pero
+  // NADIE debe esperarla: sin cobertura no se resuelve hasta que vuelva la red.
+  const guardado = setDoc(ref, documento).catch((err) => {
+    console.error('Error creando evento:', err);
+    throw err;
+  });
+  return { documento, guardado };
 }
 
 /**
@@ -210,6 +215,19 @@ export function openEvent(eventId) {
     for (const fn of oyentes) fn(estado);
   };
 
+  /**
+   * Un rechazo del servidor llega por su cuenta, mucho después de la escritura.
+   * Se guarda en el estado para que la vista pueda enseñarlo en vez de dejar
+   * al de la puerta mirando una pantalla que no responde.
+   *
+   * @param {unknown} err
+   */
+  const fallo = (err) => {
+    console.error('Firestore ha rechazado la operación:', err);
+    estado.error = err;
+    emitir();
+  };
+
   const recalcular = () => {
     estado.totales = computeTotals(estado.evento, estado.entries);
   };
@@ -231,6 +249,7 @@ export function openEvent(eventId) {
     { includeMetadataChanges: true },
     (snap) => {
       listoEvento = true;
+      estado.error = null;
       estado.existe = snap.exists();
       estado.evento = snap.exists() ? normalizarEvento(snap.data()) : null;
       recalcular();
@@ -303,7 +322,7 @@ export function openEvent(eventId) {
         note: note ? String(note).slice(0, 200) : null,
         voided: false
       };
-      setDoc(ref, documento).catch((err) => console.error('Error registrando entrada:', err));
+      setDoc(ref, documento).catch(fallo);
       return ref.id;
     },
 
@@ -314,9 +333,7 @@ export function openEvent(eventId) {
      */
     setVoided(entryId, voided) {
       const ref = doc(_db, 'events', eventId, 'entries', entryId);
-      updateDoc(ref, { voided: !!voided }).catch((err) =>
-        console.error('Error anulando entrada:', err)
-      );
+      updateDoc(ref, { voided: !!voided }).catch(fallo);
     },
 
     /**
@@ -334,15 +351,11 @@ export function openEvent(eventId) {
         if (k in patch) limpio['tickets.' + k] = Math.max(0, Math.round(num(patch[k])));
       }
       if (!Object.keys(limpio).length) return;
-      updateDoc(refEvento, limpio).catch((err) =>
-        console.error('Error guardando configuración:', err)
-      );
+      updateDoc(refEvento, limpio).catch(fallo);
     },
 
     cerrarCaja() {
-      updateDoc(refEvento, { closedAt: Timestamp.now() }).catch((err) =>
-        console.error('Error cerrando caja:', err)
-      );
+      updateDoc(refEvento, { closedAt: Timestamp.now() }).catch(fallo);
     },
 
     destroy() {
