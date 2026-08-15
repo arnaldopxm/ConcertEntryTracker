@@ -4,7 +4,7 @@
 // Estructura de app de banco: cifra grande arriba, tarjetas debajo. Aquí sí
 // está todo el dinero, la configuración del evento y el cierre de caja.
 
-import { el, boton, input, fmtEuros, fmtHora, toast, openSheet, closeSheet, copiar, enlaceDe, ETIQUETA_VERSION } from '../app.js';
+import { el, boton, input, fmtEuros, fmtHora, toast, openSheet, closeSheet, enlaceDe, ETIQUETA_VERSION } from '../app.js';
 import { explicarError } from '../errores.js';
 import { toCSV, ETIQUETA_METODO } from '../store.js';
 
@@ -106,9 +106,9 @@ export function mount(raiz, store) {
       etiquetado('Cobradas en efectivo', campos.soldCash),
       etiquetado('Cobradas por bizum', campos.soldBizum)
     ),
-    boton('button.btn.btn-secundario.btn-ancho', {
-      text: 'Copiar enlace de puerta',
-      onClick: () => copiar(enlaceDe(store.eventId, 'door'))
+    el('a.btn.btn-secundario.btn-ancho', {
+      href: enlaceDe(store.eventId, 'links'),
+      text: 'Enlaces y QR'
     })
   );
 

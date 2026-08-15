@@ -6,7 +6,7 @@
 export const VERSION = '1.0.0';
 
 /** Hash del contenido publicado. Cambia si cambia un solo byte de la app. */
-export const BUILD = 'a1fb036a3bff';
+export const BUILD = '80a34d0743b9';
 
 /** Lo que se enseña en pantalla. */
 export const ETIQUETA_VERSION = `v${VERSION} · ${BUILD}`;

@@ -238,7 +238,7 @@ export function baseURL() {
 
 /**
  * @param {string} eventId
- * @param {'door'|'desk'} rol
+ * @param {'door'|'desk'|'links'} rol
  * @returns {string}
  */
 export function enlaceDe(eventId, rol) {
@@ -264,15 +264,39 @@ export async function copiar(texto, etiqueta = 'Enlace copiado') {
   }
 }
 
+/**
+ * Abre la hoja de compartir del sistema (WhatsApp, Telegram, AirDrop…). Donde
+ * no exista, se copia al portapapeles, que es lo mismo con un paso más.
+ *
+ * @param {string} url
+ * @param {string} titulo
+ */
+export async function compartir(url, titulo) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Taquilla', text: titulo, url });
+      return;
+    } catch (err) {
+      // Cancelar no es un fallo: no hay nada que decirle a nadie.
+      if (err instanceof Error && err.name === 'AbortError') return;
+      console.warn('No se pudo compartir, se copia:', err);
+    }
+  }
+  await copiar(url);
+}
+
 // --- Router -----------------------------------------------------------------
 
-/** @returns {{eventId: string, rol: string}} */
+/** @returns {{eventId: string, rol: string, nuevo: boolean}} */
 function leerHash() {
   const bruto = location.hash.replace(/^#/, '');
   const params = new URLSearchParams(bruto);
   return {
     eventId: params.get('e') || '',
-    rol: params.get('r') || ''
+    rol: params.get('r') || '',
+    // Marca que venimos de crearlo ahora mismo, para poder confirmarlo en vez
+    // de enseñar la pantalla como si fuera una consulta cualquiera.
+    nuevo: params.get('nuevo') === '1'
   };
 }
 
@@ -310,6 +334,7 @@ async function enrutar() {
   }
 
   if (!eventId) return pantallaArranque();
+  if (rol === 'links') return pantallaEnlaces(eventId);
   if (rol !== 'door' && rol !== 'desk') return pantallaRol(eventId);
 
   tiendaActiva = openEvent(eventId);
@@ -413,8 +438,7 @@ function pantallaArranque() {
       // un evento que no se guardó deja la puerta muerta sin explicación.
       guardado.catch((err) => mostrarFalloDeGuardado(err));
 
-      limpiar();
-      pantallaEnlaces(eventId);
+      location.hash = `e=${encodeURIComponent(eventId)}&r=links&nuevo=1`;
     }
   },
     etiquetado('Nombre', campos.name),
@@ -484,7 +508,11 @@ function filaDeEvento(evento, lista, tarjeta) {
     el('div.acciones-fila',
       el('a.btn.btn-secundario', { href: enlaceDe(evento.id, 'door'), text: 'Puerta' }),
       el('a.btn.btn-primario', { href: enlaceDe(evento.id, 'desk'), text: 'Tesorería' })
-    )
+    ),
+    el('a.btn.btn-secundario.btn-ancho', {
+      href: enlaceDe(evento.id, 'links'),
+      text: 'Enlaces y QR'
+    })
   );
   return fila;
 }
@@ -570,38 +598,60 @@ function etiquetado(texto, campo, ayuda = null) {
   );
 }
 
-/** @param {string} eventId */
+/**
+ * Los dos enlaces con su QR. Es la pantalla que sale al crear el evento y
+ * también una ruta propia (#e=…&r=links) para poder volver a ella: en la puerta
+ * hace falta enseñar el QR más de una vez.
+ *
+ * @param {string} eventId
+ */
 function pantallaEnlaces(eventId) {
-  const enlacePuerta = enlaceDe(eventId, 'door');
-  const enlaceMesa = enlaceDe(eventId, 'desk');
+  const recordado = misEventos.listar().find((e) => e.id === eventId);
+  const reciente = leerHash().nuevo;
 
   raiz.append(
     el('div.pantalla',
       el('div.tarjeta',
-        el('h1.titulo', { text: 'Evento creado' }),
-        el('p.parrafo', { text: 'Guarda estos dos enlaces. Quien los tenga, entra: no hay contraseña.' }),
+        el('h1.titulo', { text: reciente ? 'Evento creado' : 'Enlaces del evento' }),
+        el('p.parrafo', {
+          text: [
+            recordado && recordado.name ? recordado.name + '.' : '',
+            reciente ? 'Guarda estos dos enlaces.' : '',
+            'Quien los tenga, entra: no hay contraseña.'
+          ].filter(Boolean).join(' ')
+        }),
 
-        el('div.bloque-enlace',
-          el('h2.subtitulo', { text: 'Puerta' }),
-          el('code.enlace', { text: enlacePuerta }),
-          el('div.acciones-fila',
-            boton('button.btn.btn-secundario', { text: 'Copiar', onClick: () => copiar(enlacePuerta) }),
-            el('a.btn.btn-primario', { href: enlacePuerta, text: 'Abrir' })
-          ),
-          qrDe(enlacePuerta),
-          el('p.pie', { text: 'Escanea este código con el móvil de la puerta.' })
-        ),
+        bloqueDeEnlace('Puerta', enlaceDe(eventId, 'door'), 'Escanea este código con el móvil de la puerta.'),
+        bloqueDeEnlace('Tesorería', enlaceDe(eventId, 'desk'), 'Y este con el móvil que lleve la caja.')
+      ),
 
-        el('div.bloque-enlace',
-          el('h2.subtitulo', { text: 'Tesorería' }),
-          el('code.enlace', { text: enlaceMesa }),
-          el('div.acciones-fila',
-            boton('button.btn.btn-secundario', { text: 'Copiar', onClick: () => copiar(enlaceMesa) }),
-            el('a.btn.btn-primario', { href: enlaceMesa, text: 'Abrir' })
-          )
-        )
+      el('div.acciones-fila',
+        el('a.btn.btn-secundario', { href: enlaceDe(eventId, 'door'), text: 'Ir a la puerta' }),
+        el('a.btn.btn-primario', { href: enlaceDe(eventId, 'desk'), text: 'Ir a tesorería' })
       )
     )
+  );
+}
+
+/**
+ * @param {string} titulo
+ * @param {string} enlace
+ * @param {string} pie
+ * @returns {HTMLElement}
+ */
+function bloqueDeEnlace(titulo, enlace, pie) {
+  return el('div.bloque-enlace',
+    el('h2.subtitulo', { text: titulo }),
+    el('code.enlace', { text: enlace }),
+    el('div.acciones-fila',
+      boton('button.btn.btn-secundario', { text: 'Copiar', onClick: () => copiar(enlace) }),
+      boton('button.btn.btn-primario', {
+        text: 'Compartir',
+        onClick: () => compartir(enlace, `Enlace de ${titulo.toLowerCase()}`)
+      })
+    ),
+    qrDe(enlace),
+    el('p.pie', { text: pie })
   );
 }
 

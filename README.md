@@ -72,8 +72,10 @@ subruta sin tocar nada.
 
 1. Abre la app, rellena nombre, fecha, precio, corte del bar y **entradas
    repartidas**, y pulsa **Crear evento**.
-2. Guarda los dos enlaces. El de puerta lleva un QR: escanéalo con el móvil que
-   va a estar en la entrada.
+2. Guarda los dos enlaces. Cada uno lleva su QR: escanéalos con el móvil que
+   corresponda. Puedes volver a esa pantalla cuando quieras, desde el botón
+   **Enlaces y QR** de tesorería o desde la lista de eventos de la portada, y
+   pasar el enlace por WhatsApp con **Compartir**.
 3. En Tesorería, apunta cuántas entradas del talonario ya cobraste por
    adelantado (en efectivo y por bizum). De ahí sale el **pendiente de cobro**.
 4. Instala la app en ambos móviles ("Añadir a pantalla de inicio") para que
