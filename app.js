@@ -10,6 +10,9 @@ import { initApp, openEvent, crearEvento, nuevoEventId } from './store.js';
 import { qrSVG } from './qr.js';
 import { explicarError } from './errores.js';
 import * as misEventos from './mis-eventos.js';
+import { ETIQUETA_VERSION } from './version.js';
+
+export { ETIQUETA_VERSION };
 
 /**
  * @param {string} id
@@ -431,7 +434,8 @@ function pantallaArranque() {
         el('p.parrafo', { text: 'Crea el evento y reparte los dos enlaces: uno para la puerta y otro para tesorería.' }),
         formulario
       ),
-      tarjetaMisEventos()
+      tarjetaMisEventos(),
+      el('p.pie.pie-version', { text: ETIQUETA_VERSION })
     )
   );
 }
@@ -561,10 +565,53 @@ function pantallaEnlaces(eventId) {
 window.addEventListener('hashchange', enrutar);
 enrutar();
 
+// --- Service worker ---------------------------------------------------------
+//
+// La versión nueva NO entra sola: se queda esperando y se ofrece un botón. En
+// mitad de una cola en la puerta, una recarga por sorpresa es peor que seguir
+// una noche con la versión anterior.
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => {
+  const habiaControlador = !!navigator.serviceWorker.controller;
+  let recargando = false;
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Solo se recarga si el usuario ha aceptado: el primer control (cuando no
+    // había ninguno) no debe mover la pantalla de nadie.
+    if (!habiaControlador || recargando) return;
+    recargando = true;
+    location.reload();
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      const registro = await navigator.serviceWorker.register('./sw.js');
+
+      if (registro.waiting) avisarDeActualizacion(registro);
+
+      registro.addEventListener('updatefound', () => {
+        const entrante = registro.installing;
+        if (!entrante) return;
+        entrante.addEventListener('statechange', () => {
+          if (entrante.state === 'installed' && navigator.serviceWorker.controller) {
+            avisarDeActualizacion(registro);
+          }
+        });
+      });
+    } catch (err) {
       console.warn('No se pudo registrar el service worker:', err);
-    });
+    }
+  });
+}
+
+/** @param {ServiceWorkerRegistration} registro */
+function avisarDeActualizacion(registro) {
+  toast('Hay una versión nueva', {
+    accion: 'Actualizar',
+    ms: 30000,
+    alAccionar: () => {
+      const esperando = registro.waiting;
+      if (esperando) esperando.postMessage({ tipo: 'SKIP_WAITING' });
+    }
   });
 }

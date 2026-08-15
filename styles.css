@@ -643,6 +643,13 @@ input {
   opacity: 0.75;
 }
 
+.pie-version {
+  margin-top: 18px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Cambio de puesto ---------------------------------------------------- */
 
 .puerta-barra {

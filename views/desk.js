@@ -4,7 +4,7 @@
 // Estructura de app de banco: cifra grande arriba, tarjetas debajo. Aquí sí
 // está todo el dinero, la configuración del evento y el cierre de caja.
 
-import { el, boton, input, fmtEuros, fmtHora, toast, openSheet, closeSheet, copiar, enlaceDe } from '../app.js';
+import { el, boton, input, fmtEuros, fmtHora, toast, openSheet, closeSheet, copiar, enlaceDe, ETIQUETA_VERSION } from '../app.js';
 import { explicarError } from '../errores.js';
 import { toCSV, ETIQUETA_METODO } from '../store.js';
 
@@ -152,7 +152,8 @@ export function mount(raiz, store) {
     tarjetaTalonario,
     tarjetaConfig,
     tarjetaMovimientos,
-    tarjetaCierre
+    tarjetaCierre,
+    el('p.pie.pie-version', { text: ETIQUETA_VERSION })
   );
 
   raiz.append(vista);

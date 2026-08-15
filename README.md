@@ -245,8 +245,15 @@ versión. **Si subes la versión de la URL en `store.js`, sube también la de
   disgustos evita— que `sw.js` precachee todos los módulos. Si añades un
   archivo y olvidas meterlo ahí, la app instalada deja de abrir sin cobertura;
   este test lo caza antes de llegar al bar.
+- **Versión** (`tests/unit/version.test.js`): que el hash sea estable, que
+  cambie al cambiar un byte, que no dependa de sí mismo, que todo módulo que la
+  app importa esté en la lista de publicados y que el service worker no se
+  active solo.
+- **Errores** (`tests/unit/errores.test.js`): que cada código de Firestore
+  produzca pasos accionables y que ningún mensaje se disculpe.
 - **Navegador** (`tests/e2e/`): los criterios de aceptación, con la puerta y
-  tesorería abiertas a la vez y sincronizando en vivo.
+  tesorería abiertas a la vez y sincronizando en vivo, más el cambio de puesto,
+  la agenda de eventos y el camino de actualización completo.
 
 ### Lo que los tests NO cubren
 
@@ -259,11 +266,52 @@ real**. Es el punto que más probablemente falle en el bar.
 Tampoco se ejecutan las reglas de Firestore: se comprueba su contenido, no su
 comportamiento. Para eso haría falta el emulador de Firebase.
 
-## Al publicar cambios
+## Versiones y actualizaciones
 
-Sube el número de versión de la caché en [`sw.js`](sw.js) (`const CACHE =
-'taquilla-v1'`). Si no, los móviles que ya tienen la app instalada seguirán
-sirviendo la versión vieja.
+La app enseña su versión abajo del todo: en la pantalla de arranque, en
+tesorería, y en la puerta dentro del panel de "cambiar de puesto". El formato es
+`v1.0.0 · 423eef544b75`: número de `package.json` y hash del contenido
+publicado.
+
+### Al publicar cambios
+
+```bash
+npm run version   # regenera version.js y el nombre de caché de sw.js
+git commit -am "..."
+git push
+```
+
+Y ya. **No hay ningún número que subir a mano.** El hash sale del contenido real
+de todo lo que se sirve, así que cambiar un byte cambia el nombre de la caché.
+Si se te olvida ejecutarlo, `npm test` y CI fallan con el comando exacto que
+tienes que correr.
+
+Para cambiar el número visible, sube la `version` de `package.json` y regenera.
+
+### Qué pasa en el móvil que ya tiene la app instalada
+
+1. Al abrir la app, el navegador comprueba `sw.js`. Como el nombre de la caché
+   lleva el hash, un despliegue nuevo produce un `sw.js` distinto byte a byte y
+   la actualización se detecta. Sin ese hash, editar `app.js` sin tocar `sw.js`
+   dejaría al móvil con la versión vieja **para siempre**: es el fallo clásico
+   de las PWA y por eso se genera.
+2. El service worker nuevo precachea todo con `cache: 'reload'`, que salta la
+   caché HTTP del navegador. GitHub Pages sirve con `max-age`, así que sin eso
+   se podrían guardar los bytes viejos de archivos que acaban de cambiar.
+3. Si algún archivo falla al descargarse, la instalación entera falla y se
+   conserva la versión anterior, que funcionaba. Nunca queda una caché a medias.
+4. La versión nueva **no entra sola**: se queda en espera y la app enseña un
+   aviso con un botón "Actualizar". Recargar por sorpresa a quien está contando
+   gente en la puerta sería peor que pasar la noche con la versión anterior.
+5. Al aceptar, el service worker nuevo toma el relevo, borra las cachés
+   anteriores y la página se recarga una sola vez.
+
+Todo esto lo comprueba [`tests/e2e/actualizacion.test.js`](tests/e2e/actualizacion.test.js),
+que despliega la app en un directorio temporal, la instala, publica encima una
+versión nueva y verifica cada paso: que se avisa, que hasta aceptar sigue
+mandando la versión anterior, que la caché nueva trae los bytes nuevos y no los
+que había en la caché HTTP, que la vieja se borra, y que después sigue abriendo
+sin red.
 
 ## Licencia
 

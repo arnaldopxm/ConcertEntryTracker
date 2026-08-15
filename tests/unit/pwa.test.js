@@ -122,8 +122,9 @@ test('el service worker nunca cachea la API de Firestore', () => {
   assert.doesNotMatch(lista[1], /googleapis/);
 });
 
-test('la caché del service worker está versionada', () => {
-  assert.match(leer('sw.js'), /const CACHE = 'taquilla-v\d+'/);
+test('la caché del service worker está versionada por contenido', () => {
+  // El detalle de cómo se genera vive en tests/unit/version.test.js.
+  assert.match(leer('sw.js'), /const CACHE = 'taquilla-\d+\.\d+\.\d+-[0-9a-f]{12}';/);
 });
 
 test('index.html solo usa rutas relativas', () => {

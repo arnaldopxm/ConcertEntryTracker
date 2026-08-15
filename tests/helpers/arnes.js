@@ -52,23 +52,34 @@ function rutaChromium() {
 }
 
 /**
- * Levanta un servidor estático sobre el repo en un puerto libre.
+ * Levanta un servidor estático en un puerto libre.
+ *
+ * Por defecto sirve el repo. Se le puede dar otra raíz para simular un
+ * despliegue distinto, y `cacheHTTP` imita la cabecera con la que GitHub Pages
+ * sirve los archivos: sin ella no se puede comprobar que el precacheo del
+ * service worker se salta la caché del navegador.
+ *
+ * @param {{raiz?: string, cacheHTTP?: string}} [opciones]
  * @returns {Promise<{base: string, cerrar: () => Promise<void>}>}
  */
-export async function servidorEstatico() {
+export async function servidorEstatico({ raiz = RAIZ, cacheHTTP = '' } = {}) {
   const servidor = http.createServer((req, res) => {
     let rel = decodeURIComponent((req.url || '/').split('?')[0]);
     if (rel === '/') rel = '/index.html';
-    const archivo = path.join(RAIZ, rel);
+    const archivo = path.join(raiz, rel);
 
-    if (!archivo.startsWith(RAIZ) || !fs.existsSync(archivo) || fs.statSync(archivo).isDirectory()) {
+    if (!archivo.startsWith(raiz) || !fs.existsSync(archivo) || fs.statSync(archivo).isDirectory()) {
       res.writeHead(404);
       res.end('no encontrado');
       return;
     }
-    res.writeHead(200, {
+    /** @type {Record<string, string>} */
+    const cabeceras = {
       'content-type': TIPOS[path.extname(archivo)] || 'application/octet-stream'
-    });
+    };
+    if (cacheHTTP) cabeceras['cache-control'] = cacheHTTP;
+
+    res.writeHead(200, cabeceras);
     res.end(fs.readFileSync(archivo));
   });
 
@@ -89,10 +100,12 @@ export async function servidorEstatico() {
 
 /**
  * Abre un contexto de navegador con el SDK de Firebase interceptado.
+ *
+ * @param {{raiz?: string, cacheHTTP?: string}} [opciones] se pasan al servidor
  * @returns {Promise<{contexto: import('playwright').BrowserContext, base: string, errores: string[], cerrar: () => Promise<void>}>}
  */
-export async function abrirNavegador() {
-  const { base, cerrar: cerrarServidor } = await servidorEstatico();
+export async function abrirNavegador(opciones = {}) {
+  const { base, cerrar: cerrarServidor } = await servidorEstatico(opciones);
 
   const ejecutable = rutaChromium();
   const navegador = await chromium.launch(ejecutable ? { executablePath: ejecutable } : {});

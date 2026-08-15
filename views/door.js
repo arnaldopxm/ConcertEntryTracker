@@ -4,7 +4,7 @@
 // Una pantalla, sin scroll, sin menús y sin dinero: aquí solo se cuenta gente.
 // Dos toques por persona como máximo.
 
-import { el, boton, input, toast, openSheet, closeSheet, vibrar, enlaceDe } from '../app.js';
+import { el, boton, input, toast, openSheet, closeSheet, vibrar, enlaceDe, ETIQUETA_VERSION } from '../app.js';
 import { explicarError } from '../errores.js';
 
 /** @typedef {import('../store.js').Store} Store */
@@ -130,11 +130,6 @@ export function mount(raiz, store) {
   }
 
   /**
-   * @param {string} texto
-   * @param {string} clase
-   * @returns {HTMLButtonElement}
-   */
-  /**
    * @param {boolean} disponible
    * @param {boolean} cargando
    */
@@ -183,7 +178,8 @@ export function mount(raiz, store) {
             onClick: () => closeSheet()
           }),
           boton('button.btn-sheet.btn-sheet-no', { text: 'Seguir en la puerta', onClick: () => closeSheet() })
-        )
+        ),
+        el('p.pie.pie-version', { text: ETIQUETA_VERSION })
       )
     );
   }
@@ -206,8 +202,10 @@ export function mount(raiz, store) {
   });
   botones.guest.addEventListener('click', () => registrar('guest', false));
 
-  /** Paso 1: la única pregunta del flujo. */
-  /** @param {Metodo} metodo */
+  /**
+   * Paso 1: la única pregunta del flujo.
+   * @param {Metodo} metodo
+   */
   function preguntarEntrada(metodo) {
     const sinTalonario = estado.totales.entradasRestantes <= 0;
 

@@ -11,17 +11,27 @@
 //   · API de Firestore (googleapis.com): nunca se toca. El SDK ya tiene su
 //     propia caché en IndexedDB y su cola de escrituras offline.
 //
-// Sube el número de CACHE al publicar cambios: invalida la caché anterior.
+// El nombre de CACHE lo genera scripts/version.mjs a partir del hash del
+// contenido publicado. NO se toca a mano: `npm run version` lo pone al día y
+// `npm run version:check` (en CI) falla si alguien lo olvida. Cambiar un byte
+// de la app cambia el hash, con lo que cambia el nombre de la caché y el
+// navegador ve un sw.js distinto: sin eso, un despliegue podría no llegar nunca
+// a un móvil que ya tiene la app instalada.
+//
+// La actualización NO se aplica sola. Un service worker nuevo se queda en
+// espera y la app ofrece un botón: recargar por sorpresa a quien está contando
+// gente en la puerta sería peor que ir una noche con la versión anterior.
 
 /** El scope de un service worker no es Window: TS necesita que se lo digamos. */
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
 
-const CACHE = 'taquilla-v3';
+const CACHE = 'taquilla-1.0.0-423eef544b75';
 
 const SHELL = [
   './',
   './index.html',
   './app.js',
+  './version.js',
   './store.js',
   './calc.js',
   './errores.js',
@@ -38,12 +48,33 @@ const SHELL = [
 ];
 
 sw.addEventListener('install', (evento) => {
-  evento.waitUntil(
-    caches.open(CACHE)
-      // addAll falla entero si un recurso falla; así no queda una caché a medias.
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => sw.skipWaiting())
+  evento.waitUntil(precachear());
+});
+
+/**
+ * Precacheo con `cache: 'reload'`, que es el detalle que se olvida siempre:
+ * cache.addAll() pasa por la caché HTTP del navegador, y GitHub Pages sirve con
+ * max-age. Sin forzar red, un service worker nuevo puede acabar guardando los
+ * bytes VIEJOS de los archivos y dejar la app en un estado imposible de
+ * diagnosticar. Si algo falla, la instalación entera falla y se conserva la
+ * versión anterior, que funcionaba.
+ *
+ * @returns {Promise<void>}
+ */
+async function precachear() {
+  const cache = await caches.open(CACHE);
+  await Promise.all(
+    SHELL.map(async (recurso) => {
+      const respuesta = await fetch(new Request(recurso, { cache: 'reload' }));
+      if (!respuesta.ok) throw new Error(`No se pudo precachear ${recurso}: ${respuesta.status}`);
+      await cache.put(recurso, respuesta);
+    })
   );
+}
+
+// La app pide el relevo cuando el usuario acepta actualizar.
+sw.addEventListener('message', (evento) => {
+  if (evento.data && evento.data.tipo === 'SKIP_WAITING') sw.skipWaiting();
 });
 
 sw.addEventListener('activate', (evento) => {

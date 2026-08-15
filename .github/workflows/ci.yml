@@ -31,6 +31,12 @@ jobs:
       - name: Comprobación de tipos
         run: npm run typecheck
 
+      # Si alguien cambia un archivo publicado y no regenera la versión, el
+      # nombre de la caché no cambiaría y un móvil con la app instalada se
+      # quedaría con la versión vieja para siempre.
+      - name: Versión de publicación al día
+        run: npm run version:check
+
       - name: Tests unitarios
         run: npm run test:unit
 
