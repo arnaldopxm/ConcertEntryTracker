@@ -1,11 +1,21 @@
+// @ts-check
 // views/desk.js — vista de tesorería.
 //
 // Estructura de app de banco: cifra grande arriba, tarjetas debajo. Aquí sí
 // está todo el dinero, la configuración del evento y el cierre de caja.
 
-import { el, fmtEuros, fmtHora, toast, openSheet, closeSheet, copiar, enlaceDe } from '../app.js';
+import { el, boton, input, fmtEuros, fmtHora, toast, openSheet, closeSheet, copiar, enlaceDe } from '../app.js';
 import { toCSV, ETIQUETA_METODO } from '../store.js';
 
+/** @typedef {import('../store.js').Store} Store */
+/** @typedef {import('../store.js').EstadoEvento} EstadoEvento */
+/** @typedef {import('../calc.js').Entry} Entry */
+
+/**
+ * @param {HTMLElement} raiz
+ * @param {Store} store
+ * @returns {() => void} desmontar
+ */
 export function mount(raiz, store) {
   // --- Cabecera y saldo
   const barraRed = el('div.barra-red', { hidden: true });
@@ -56,16 +66,17 @@ export function mount(raiz, store) {
 
   // --- Configuración
   const campos = {
-    name: el('input.campo', { type: 'text', maxLength: 120 }),
-    date: el('input.campo', { type: 'date' }),
-    price: el('input.campo', { type: 'number', min: '0', step: '0.5', inputMode: 'decimal' }),
-    barPct: el('input.campo', { type: 'number', min: '0', max: '100', step: '1', inputMode: 'numeric' }),
-    delivered: el('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' }),
-    soldCash: el('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' }),
-    soldBizum: el('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' }),
-    returned: el('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' })
+    name: input('input.campo', { type: 'text', maxLength: 120 }),
+    date: input('input.campo', { type: 'date' }),
+    price: input('input.campo', { type: 'number', min: '0', step: '0.5', inputMode: 'decimal' }),
+    barPct: input('input.campo', { type: 'number', min: '0', max: '100', step: '1', inputMode: 'numeric' }),
+    delivered: input('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' }),
+    soldCash: input('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' }),
+    soldBizum: input('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' }),
+    returned: input('input.campo', { type: 'number', min: '0', step: '1', inputMode: 'numeric' })
   };
 
+  /** @type {Map<string, ReturnType<typeof setTimeout>>} */
   const temporizadores = new Map();
   for (const [clave, campo] of Object.entries(campos)) {
     const guardar = () => {
@@ -93,8 +104,7 @@ export function mount(raiz, store) {
       etiquetado('Cobradas en efectivo', campos.soldCash),
       etiquetado('Cobradas por bizum', campos.soldBizum)
     ),
-    el('button.btn.btn-secundario.btn-ancho', {
-      type: 'button',
+    boton('button.btn.btn-secundario.btn-ancho', {
       text: 'Copiar enlace de puerta',
       onClick: () => copiar(enlaceDe(store.eventId, 'door'))
     })
@@ -108,13 +118,11 @@ export function mount(raiz, store) {
   );
 
   // --- Cierre
-  const botonCerrar = el('button.btn.btn-peligro.btn-ancho', {
-    type: 'button',
+  const botonCerrar = boton('button.btn.btn-peligro.btn-ancho', {
     text: 'Cerrar caja',
     onClick: confirmarCierre
   });
-  const botonCSV = el('button.btn.btn-secundario.btn-ancho', {
-    type: 'button',
+  const botonCSV = boton('button.btn.btn-secundario.btn-ancho', {
     text: 'Descargar CSV',
     onClick: descargarCSV
   });
@@ -144,7 +152,7 @@ export function mount(raiz, store) {
   raiz.append(vista);
 
   let estado = store.getState();
-  const desuscribir = store.subscribe((nuevo) => {
+  const desuscribir = store.subscribe(/** @param {EstadoEvento} nuevo */ (nuevo) => {
     estado = nuevo;
     pintar();
   });
@@ -209,6 +217,10 @@ export function mount(raiz, store) {
     pintarMovimientos(entries, cerrado);
   }
 
+  /**
+   * @param {Entry[]} entries
+   * @param {boolean} cerrado
+   */
   function pintarMovimientos(entries, cerrado) {
     listaMovimientos.textContent = '';
 
@@ -236,8 +248,7 @@ export function mount(raiz, store) {
         el('div.mov-importe', { text: fmtEuros(cobra && !entrada.voided ? estado.totales.price : 0) }),
         cerrado
           ? null
-          : el('button.mov-accion', {
-              type: 'button',
+          : boton('button.mov-accion', {
               text: entrada.voided ? 'Restaurar' : 'Anular',
               onClick: () => {
                 store.setVoided(entrada.id, !entrada.voided);
@@ -253,8 +264,7 @@ export function mount(raiz, store) {
     const contenido = el('div.sheet-contenido',
       el('p.parrafo', { text: 'Se guarda la hora del cierre y la app deja de aceptar registros en los dos móviles. No se puede reabrir desde aquí.' }),
       el('div.sheet-botones',
-        el('button.btn-sheet.btn-sheet-peligro', {
-          type: 'button',
+        boton('button.btn-sheet.btn-sheet-peligro', {
           text: 'Cerrar caja',
           onClick: () => {
             store.cerrarCaja();
@@ -262,7 +272,7 @@ export function mount(raiz, store) {
             toast('Caja cerrada');
           }
         }),
-        el('button.btn-sheet.btn-sheet-no', { type: 'button', text: 'Cancelar', onClick: () => closeSheet() })
+        boton('button.btn-sheet.btn-sheet-no', { text: 'Cancelar', onClick: () => closeSheet() })
       )
     );
     openSheet('¿Cerrar la caja?', contenido);
@@ -293,6 +303,13 @@ export function mount(raiz, store) {
 
 // --- Piezas -----------------------------------------------------------------
 
+/**
+ * @param {string} titulo
+ * @param {HTMLElement} valor
+ * @param {HTMLElement} sub
+ * @param {string} clase
+ * @returns {HTMLElement}
+ */
 function tarjetaMini(titulo, valor, sub, clase) {
   return el('section.tarjeta.tarjeta-mini.' + clase,
     el('div.tarjeta-mini-titulo', { text: titulo }),
@@ -301,27 +318,50 @@ function tarjetaMini(titulo, valor, sub, clase) {
   );
 }
 
+/**
+ * @param {HTMLElement} etiqueta
+ * @param {HTMLElement} valor
+ * @param {string} [extra]
+ * @returns {HTMLElement}
+ */
 function linea(etiqueta, valor, extra = '') {
   return el('div.linea' + (extra ? '.' + extra : ''), etiqueta, valor);
 }
 
+/**
+ * @param {string} texto
+ * @param {HTMLElement} campo
+ * @returns {HTMLElement}
+ */
 function etiquetado(texto, campo) {
   const id = 'd' + Math.random().toString(36).slice(2, 8);
   campo.id = id;
   return el('label.etiqueta', { htmlFor: id }, el('span.etiqueta-texto', { text: texto }), campo);
 }
 
-/** No pisa lo que el tesorero está escribiendo en ese momento. */
+/**
+ * No pisa lo que el tesorero está escribiendo en ese momento.
+ * @param {HTMLInputElement} campo
+ * @param {string|number} valor
+ */
 function poner(campo, valor) {
   if (document.activeElement === campo) return;
   const nuevo = String(valor ?? '');
   if (campo.value !== nuevo) campo.value = nuevo;
 }
 
+/**
+ * @param {number} n
+ * @returns {number}
+ */
 function redondear(n) {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * @param {string} iso
+ * @returns {string}
+ */
 function formatearFecha(iso) {
   if (!iso) return '';
   const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);

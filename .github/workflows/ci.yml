@@ -1,0 +1,41 @@
+name: CI
+
+# La app se publica tal cual desde GitHub Pages: aquí no se compila nada, solo
+# se comprueba que lo que hay en el repo es correcto.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias de desarrollo
+        run: npm ci
+
+      - name: Linter
+        run: npm run lint
+
+      - name: Comprobación de tipos
+        run: npm run typecheck
+
+      - name: Tests unitarios
+        run: npm run test:unit
+
+      - name: Instalar Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Tests de navegador
+        run: npm run test:e2e

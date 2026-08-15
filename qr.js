@@ -1,3 +1,4 @@
+// @ts-check
 // qr.js — generador de códigos QR mínimo, sin dependencias.
 //
 // Modo byte (UTF-8), nivel de corrección M, versiones 1 a 10. Suficiente para
@@ -5,8 +6,11 @@
 // Se genera la matriz a mano y se pinta como SVG: ni CDN extra ni API de
 // imágenes externa que dependa de la red del bar.
 
+/** @typedef {{ec: number, bloques: Array<[number, number]>}} EstructuraVersion */
+
 // Tabla por versión (nivel M): códigos de corrección por bloque y estructura de
 // bloques de datos [ [nºbloques, códigosDeDatos], ... ].
+/** @type {Record<number, EstructuraVersion>} */
 const VERSIONES = {
   1: { ec: 10, bloques: [[1, 16]] },
   2: { ec: 16, bloques: [[1, 28]] },
@@ -21,6 +25,7 @@ const VERSIONES = {
 };
 
 // Centros de los patrones de alineación por versión.
+/** @type {Record<number, number[]>} */
 const ALINEACION = {
   1: [],
   2: [6, 18],
@@ -51,11 +56,20 @@ const LOG = new Uint8Array(256);
   for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
 })();
 
+/**
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
 function mul(a, b) {
   if (a === 0 || b === 0) return 0;
   return EXP[LOG[a] + LOG[b]];
 }
 
+/**
+ * @param {number} grado
+ * @returns {number[]}
+ */
 function generador(grado) {
   let poly = [1];
   for (let i = 0; i < grado; i++) {
@@ -69,6 +83,11 @@ function generador(grado) {
   return poly;
 }
 
+/**
+ * @param {number[]} datos
+ * @param {number} ecLen
+ * @returns {number[]}
+ */
 function correccion(datos, ecLen) {
   const gen = generador(ecLen);
   const buf = new Array(datos.length + ecLen).fill(0);
@@ -83,16 +102,28 @@ function correccion(datos, ecLen) {
 
 // --- Codificación ----------------------------------------------------------
 
+/**
+ * @param {number} version
+ * @returns {number}
+ */
 function capacidadDatos(version) {
   const v = VERSIONES[version];
   return v.bloques.reduce((acc, [n, d]) => acc + n * d, 0);
 }
 
+/**
+ * @param {number} version
+ * @returns {number}
+ */
 function capacidadBytes(version) {
   const bitsCabecera = 4 + (version >= 10 ? 16 : 8);
   return Math.floor((capacidadDatos(version) * 8 - bitsCabecera) / 8);
 }
 
+/**
+ * @param {number} nBytes
+ * @returns {number}
+ */
 function elegirVersion(nBytes) {
   for (let v = 1; v <= 10; v++) {
     if (nBytes <= capacidadBytes(v)) return v;
@@ -100,8 +131,18 @@ function elegirVersion(nBytes) {
   throw new Error('Texto demasiado largo para un QR de versión 10');
 }
 
+/**
+ * @param {number[]} bytes
+ * @param {number} version
+ * @returns {number[]}
+ */
 function bitsDeDatos(bytes, version) {
+  /** @type {number[]} */
   const bits = [];
+  /**
+   * @param {number} valor
+   * @param {number} longitud
+   */
   const push = (valor, longitud) => {
     for (let i = longitud - 1; i >= 0; i--) bits.push((valor >> i) & 1);
   };
@@ -122,6 +163,7 @@ function bitsDeDatos(bytes, version) {
     push(relleno[i++ % 2], 8);
   }
 
+  /** @type {number[]} */
   const codigos = [];
   for (let j = 0; j < bits.length; j += 8) {
     let byte = 0;
@@ -131,8 +173,14 @@ function bitsDeDatos(bytes, version) {
   return codigos;
 }
 
+/**
+ * @param {number[]} codigos
+ * @param {number} version
+ * @returns {number[]}
+ */
 function intercalar(codigos, version) {
   const { ec, bloques } = VERSIONES[version];
+  /** @type {number[][]} */
 
   const datosPorBloque = [];
   let cursor = 0;
@@ -144,6 +192,7 @@ function intercalar(codigos, version) {
   }
   const ecPorBloque = datosPorBloque.map((b) => correccion(b, ec));
 
+  /** @type {number[]} */
   const salida = [];
   const maxDatos = Math.max(...datosPorBloque.map((b) => b.length));
   for (let i = 0; i < maxDatos; i++) {
@@ -159,6 +208,10 @@ function intercalar(codigos, version) {
 
 // --- Matriz ----------------------------------------------------------------
 
+/**
+ * @param {number} mask
+ * @returns {number}
+ */
 function infoFormato(mask) {
   const datos = (EC_M << 3) | mask;
   let rem = datos << 10;
@@ -168,6 +221,10 @@ function infoFormato(mask) {
   return ((datos << 10) | (rem & 0x3ff)) ^ 0x5412;
 }
 
+/**
+ * @param {number} version
+ * @returns {number}
+ */
 function infoVersion(version) {
   let rem = version << 12;
   for (let i = 17; i >= 12; i--) {
@@ -176,17 +233,30 @@ function infoVersion(version) {
   return (version << 12) | (rem & 0xfff);
 }
 
+/**
+ * @param {number} version
+ * @returns {{m: Uint8Array[], fija: Uint8Array[], size: number}}
+ */
 function crearMatriz(version) {
   const size = version * 4 + 17;
   const m = Array.from({ length: size }, () => new Uint8Array(size));
   const fija = Array.from({ length: size }, () => new Uint8Array(size));
 
+  /**
+   * @param {number} fila
+   * @param {number} col
+   * @param {boolean|number} valor
+   */
   const set = (fila, col, valor) => {
     m[fila][col] = valor ? 1 : 0;
     fija[fila][col] = 1;
   };
 
   // Buscadores y separadores.
+  /**
+   * @param {number} fila0
+   * @param {number} col0
+   */
   const buscador = (fila0, col0) => {
     for (let df = -1; df <= 7; df++) {
       for (let dc = -1; dc <= 7; dc++) {
@@ -250,6 +320,12 @@ function crearMatriz(version) {
   return { m, fija, size };
 }
 
+/**
+ * @param {Uint8Array[]} m
+ * @param {Uint8Array[]} fija
+ * @param {number} size
+ * @param {number[]} codigos
+ */
 function colocarDatos(m, fija, size, codigos) {
   let bit = 0;
   const total = codigos.length * 8;
@@ -272,6 +348,12 @@ function colocarDatos(m, fija, size, codigos) {
   }
 }
 
+/**
+ * @param {number} mask
+ * @param {number} fila
+ * @param {number} col
+ * @returns {boolean}
+ */
 function condicionMask(mask, fila, col) {
   switch (mask) {
     case 0: return (fila + col) % 2 === 0;
@@ -285,6 +367,13 @@ function condicionMask(mask, fila, col) {
   }
 }
 
+/**
+ * @param {Uint8Array[]} m
+ * @param {Uint8Array[]} fija
+ * @param {number} size
+ * @param {number} mask
+ * @returns {Uint8Array[]}
+ */
 function aplicarMask(m, fija, size, mask) {
   const out = m.map((f) => Uint8Array.from(f));
   for (let fila = 0; fila < size; fila++) {
@@ -296,8 +385,14 @@ function aplicarMask(m, fija, size, mask) {
   return out;
 }
 
+/**
+ * @param {Uint8Array[]} m
+ * @param {number} size
+ * @param {number} mask
+ */
 function escribirFormato(m, size, mask) {
   const bits = infoFormato(mask);
+  /** @param {number} i */
   const bit = (i) => (bits >> i) & 1;
 
   for (let i = 0; i <= 5; i++) m[i][8] = bit(i);
@@ -312,10 +407,16 @@ function escribirFormato(m, size, mask) {
   m[size - 8][8] = 1;
 }
 
+/**
+ * @param {Uint8Array[]} m
+ * @param {number} size
+ * @returns {number}
+ */
 function penalizacion(m, size) {
   let total = 0;
 
   // Regla 1: rachas de 5 o más módulos del mismo color.
+  /** @param {(a: number, b: number) => number} get */
   const racha = (get) => {
     for (let a = 0; a < size; a++) {
       let anterior = -1;
@@ -347,6 +448,13 @@ function penalizacion(m, size) {
   // Regla 3: patrón tipo buscador 1:1:3:1:1 con zona clara al lado.
   const patron = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
   const patronInv = [...patron].reverse();
+  /**
+   * @param {(x: number, y: number) => number} get
+   * @param {number} a
+   * @param {number} b
+   * @param {number[]} p
+   * @returns {boolean}
+   */
   const coincide = (get, a, b, p) => {
     for (let i = 0; i < 11; i++) {
       if (get(a, b + i) !== p[i]) return false;
@@ -374,6 +482,10 @@ function penalizacion(m, size) {
 }
 
 /** Devuelve { size, modules } donde modules[fila][col] es 1 (oscuro) o 0. */
+/**
+ * @param {string} texto
+ * @returns {{size: number, modules: Uint8Array[]}}
+ */
 export function generarQR(texto) {
   const bytes = Array.from(new TextEncoder().encode(texto));
   const version = elegirVersion(bytes.length);
@@ -382,6 +494,7 @@ export function generarQR(texto) {
   const { m, fija, size } = crearMatriz(version);
   colocarDatos(m, fija, size, codigos);
 
+  /** @type {Uint8Array[]|null} */
   let mejor = null;
   let mejorPuntos = Infinity;
   for (let mask = 0; mask < 8; mask++) {
@@ -394,10 +507,20 @@ export function generarQR(texto) {
     }
   }
 
+  // Inalcanzable: el bucle recorre las 8 máscaras. La comprobación existe para
+  // que el tipo de retorno no arrastre un null que nadie va a ver.
+  if (!mejor) throw new Error('No se pudo enmascarar el QR');
+
   return { size, modules: mejor };
 }
 
-/** SVG cuadrado, listo para meter en innerHTML. Fondo blanco por contraste. */
+/**
+ * SVG cuadrado, listo para meter en innerHTML. Fondo blanco por contraste.
+ *
+ * @param {string} texto
+ * @param {{margen?: number, claro?: string, oscuro?: string}} [opciones]
+ * @returns {string}
+ */
 export function qrSVG(texto, { margen = 4, claro = '#FFFFFF', oscuro = '#0B0B0F' } = {}) {
   const { size, modules } = generarQR(texto);
   const total = size + margen * 2;

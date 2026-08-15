@@ -1,0 +1,11 @@
+# Dependencias de desarrollo. La app que se publica no usa ninguna: se sirve
+# tal cual desde GitHub Pages.
+node_modules/
+
+# Salidas de herramientas
+*.tsbuildinfo
+test-results/
+playwright-report/
+
+# Sistema
+.DS_Store

@@ -1,3 +1,4 @@
+// @ts-check
 // app.js — arranque, router de hash y utilidades de interfaz compartidas.
 //
 // Rutas:
@@ -8,13 +9,37 @@
 import { initApp, openEvent, crearEvento, nuevoEventId } from './store.js';
 import { qrSVG } from './qr.js';
 
-const raiz = document.getElementById('app');
-const hostToast = document.getElementById('toast-host');
-const hostSheet = document.getElementById('sheet-host');
+/**
+ * @param {string} id
+ * @returns {HTMLElement}
+ */
+function porId(id) {
+  const nodo = document.getElementById(id);
+  if (!nodo) throw new Error(`Falta #${id} en index.html`);
+  return nodo;
+}
+
+const raiz = porId('app');
+const hostToast = porId('toast-host');
+const hostSheet = porId('sheet-host');
+
+/** @typedef {Node|string|number|null|false|undefined} Hijo */
+/** @typedef {Hijo|Hijo[]} Hijos */
 
 // --- Utilidades de DOM ------------------------------------------------------
 
-/** el('div.clase#id', { attr }, ...hijos) */
+/**
+ * el('div.clase#id', { attr }, ...hijos)
+ *
+ * Los props se aplican como propiedad si existe en el nodo y si no como
+ * atributo. `onClick`, `onInput`, `onChange` y `onSubmit` registran eventos;
+ * `text` y `html` rellenan el contenido.
+ *
+ * @param {string} selector
+ * @param {Record<string, any>|Hijos} [props]
+ * @param {...Hijos} hijos
+ * @returns {HTMLElement}
+ */
 export function el(selector, props = {}, ...hijos) {
   // Permite omitir props: el('div.caja', hijo1, hijo2)
   if (props instanceof Node || typeof props === 'string' || Array.isArray(props)) {
@@ -36,14 +61,36 @@ export function el(selector, props = {}, ...hijos) {
     else if (k === 'html') nodo.innerHTML = v;
     else if (k === 'text') nodo.textContent = v;
     else if (k === 'class') nodo.className += (nodo.className ? ' ' : '') + v;
-    else if (k in nodo && k !== 'list') nodo[k] = v;
-    else nodo.setAttribute(k, v);
+    else if (k in nodo && k !== 'list') /** @type {any} */ (nodo)[k] = v;
+    else nodo.setAttribute(k, String(v));
   }
   for (const hijo of hijos.flat()) {
     if (hijo === null || hijo === undefined || hijo === false) continue;
     nodo.append(hijo instanceof Node ? hijo : document.createTextNode(String(hijo)));
   }
   return nodo;
+}
+
+/**
+ * Igual que el(), pero devuelve el tipo concreto para no ir casteando cada vez
+ * que hace falta leer .value o poner .disabled.
+ *
+ * @param {string} [selector]
+ * @param {Record<string, any>} [props]
+ * @returns {HTMLInputElement}
+ */
+export function input(selector = 'input.campo', props = {}) {
+  return /** @type {HTMLInputElement} */ (el(selector, props));
+}
+
+/**
+ * @param {string} selector
+ * @param {Record<string, any>} [props]
+ * @param {...Hijos} hijos
+ * @returns {HTMLButtonElement}
+ */
+export function boton(selector, props = {}, ...hijos) {
+  return /** @type {HTMLButtonElement} */ (el(selector, { type: 'button', ...props }, ...hijos));
 }
 
 const FORMATO_EUROS = new Intl.NumberFormat('es-ES', {
@@ -53,26 +100,47 @@ const FORMATO_EUROS = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 2
 });
 
+/**
+ * @param {number} n
+ * @returns {string}
+ */
 export function fmtEuros(n) {
   return FORMATO_EUROS.format(Number.isFinite(n) ? n : 0);
 }
 
+/**
+ * @param {Date|null} fecha
+ * @returns {string}
+ */
 export function fmtHora(fecha) {
   if (!fecha) return '--:--';
   return fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Vibración corta de confirmación. Silenciosa si el móvil no la soporta. */
+/**
+ * Vibración corta de confirmación. Silenciosa si el móvil no la soporta.
+ * @param {number} [ms]
+ */
 export function vibrar(ms = 30) {
   if (navigator.vibrate) {
-    try { navigator.vibrate(ms); } catch { /* algunos navegadores lo bloquean */ }
+    try {
+      navigator.vibrate(ms);
+    } catch {
+      // Algunos navegadores la bloquean sin interacción previa. No es crítico.
+    }
   }
 }
 
 // --- Toasts -----------------------------------------------------------------
 
+/** @type {{nodo: HTMLElement, temporizador: ReturnType<typeof setTimeout>}|null} */
 let toastActivo = null;
 
+/**
+ * @param {string} texto
+ * @param {{accion?: string|null, alAccionar?: (() => void)|null, ms?: number}} [opciones]
+ * @returns {() => void}
+ */
 export function toast(texto, { accion = null, alAccionar = null, ms = 5000 } = {}) {
   cerrarToast();
 
@@ -80,12 +148,11 @@ export function toast(texto, { accion = null, alAccionar = null, ms = 5000 } = {
 
   if (accion) {
     nodo.append(
-      el('button.toast-accion', {
-        type: 'button',
+      boton('button.toast-accion', {
         text: accion,
         onClick: () => {
           cerrarToast();
-          alAccionar && alAccionar();
+          if (alAccionar) alAccionar();
         }
       })
     );
@@ -106,9 +173,17 @@ function cerrarToast() {
 
 // --- Bottom sheets ----------------------------------------------------------
 
+/** @type {{contenedor: HTMLElement, alCerrar: (() => void)|null, alTeclado: (ev: KeyboardEvent) => void}|null} */
 let sheetActivo = null;
 
-/** Abre un panel inferior. Devuelve la función para cerrarlo. */
+/**
+ * Abre un panel inferior. Devuelve la función para cerrarlo.
+ *
+ * @param {string} titulo
+ * @param {HTMLElement} contenido
+ * @param {{alCerrar?: (() => void)|null}} [opciones]
+ * @returns {() => void}
+ */
 export function openSheet(titulo, contenido, { alCerrar = null } = {}) {
   closeSheet();
   // Un toast abierto taparía los botones del panel: en una pantalla de móvil no
@@ -126,6 +201,7 @@ export function openSheet(titulo, contenido, { alCerrar = null } = {}) {
   const fondo = el('div.sheet-fondo', { onClick: () => closeSheet() });
   const contenedor = el('div.sheet-wrap', {}, fondo, panel);
 
+  /** @param {KeyboardEvent} ev */
   const alTeclado = (ev) => {
     if (ev.key === 'Escape') closeSheet();
   };
@@ -135,7 +211,7 @@ export function openSheet(titulo, contenido, { alCerrar = null } = {}) {
   sheetActivo = { contenedor, alCerrar, alTeclado };
 
   const primerBoton = panel.querySelector('button, input');
-  if (primerBoton && !primerBoton.matches('input')) primerBoton.focus({ preventScroll: true });
+  if (primerBoton instanceof HTMLButtonElement) primerBoton.focus({ preventScroll: true });
 
   return closeSheet;
 }
@@ -146,7 +222,7 @@ export function closeSheet() {
   sheetActivo = null;
   document.removeEventListener('keydown', alTeclado);
   contenedor.remove();
-  alCerrar && alCerrar();
+  if (alCerrar) alCerrar();
 }
 
 // --- Enlaces ----------------------------------------------------------------
@@ -155,20 +231,29 @@ export function baseURL() {
   return location.origin + location.pathname;
 }
 
+/**
+ * @param {string} eventId
+ * @param {'door'|'desk'} rol
+ * @returns {string}
+ */
 export function enlaceDe(eventId, rol) {
   return `${baseURL()}#e=${encodeURIComponent(eventId)}&r=${rol}`;
 }
 
+/**
+ * @param {string} texto
+ * @param {string} [etiqueta]
+ */
 export async function copiar(texto, etiqueta = 'Enlace copiado') {
   try {
     await navigator.clipboard.writeText(texto);
     toast(etiqueta, { ms: 2500 });
   } catch {
     // Sin permiso de portapapeles: seleccionamos el texto para copiar a mano.
-    const campo = el('input', { value: texto, readOnly: true, class: 'copia-fallback' });
+    const campo = input('input.copia-fallback', { value: texto, readOnly: true });
     document.body.append(campo);
     campo.select();
-    const ok = document.execCommand && document.execCommand('copy');
+    const ok = typeof document.execCommand === 'function' && document.execCommand('copy');
     campo.remove();
     toast(ok ? etiqueta : 'Copia el enlace a mano: ' + texto, { ms: ok ? 2500 : 8000 });
   }
@@ -176,6 +261,7 @@ export async function copiar(texto, etiqueta = 'Enlace copiado') {
 
 // --- Router -----------------------------------------------------------------
 
+/** @returns {{eventId: string, rol: string}} */
 function leerHash() {
   const bruto = location.hash.replace(/^#/, '');
   const params = new URLSearchParams(bruto);
@@ -185,13 +271,19 @@ function leerHash() {
   };
 }
 
+/** @type {(() => void)|null} */
 let desmontarVista = null;
+/** @type {ReturnType<typeof openEvent>|null} */
 let tiendaActiva = null;
 
 function limpiar() {
   closeSheet();
   if (desmontarVista) {
-    try { desmontarVista(); } catch (err) { console.error(err); }
+    try {
+      desmontarVista();
+    } catch (err) {
+      console.error(err);
+    }
     desmontarVista = null;
   }
   if (tiendaActiva) {
@@ -205,15 +297,12 @@ async function enrutar() {
   limpiar();
   const { eventId, rol } = leerHash();
 
-  let firebaseListo = true;
   try {
     await initApp();
   } catch (err) {
-    firebaseListo = false;
-    if (err.message === 'CONFIG_PENDIENTE') return pantallaConfig();
+    if (err instanceof Error && err.message === 'CONFIG_PENDIENTE') return pantallaConfig();
     return pantallaError(err);
   }
-  if (!firebaseListo) return;
 
   if (!eventId) return pantallaArranque();
   if (rol !== 'door' && rol !== 'desk') return pantallaRol(eventId);
@@ -243,18 +332,21 @@ function pantallaConfig() {
   );
 }
 
+/** @param {unknown} err */
 function pantallaError(err) {
+  const mensaje = err instanceof Error ? err.message : String(err);
   raiz.append(
     el('div.pantalla',
       el('div.tarjeta',
         el('h1.titulo', { text: 'No se pudo arrancar' }),
-        el('p.parrafo', { text: String(err && err.message ? err.message : err) }),
-        el('button.btn.btn-primario', { type: 'button', text: 'Reintentar', onClick: () => location.reload() })
+        el('p.parrafo', { text: mensaje }),
+        boton('button.btn.btn-primario', { text: 'Reintentar', onClick: () => location.reload() })
       )
     )
   );
 }
 
+/** @param {string} eventId */
 function pantallaRol(eventId) {
   raiz.append(
     el('div.pantalla',
@@ -274,14 +366,15 @@ function pantallaArranque() {
   const hoy = new Date().toISOString().slice(0, 10);
 
   const campos = {
-    name: el('input.campo', { type: 'text', value: 'Concierto', required: true, maxLength: 120 }),
-    date: el('input.campo', { type: 'date', value: hoy }),
-    price: el('input.campo', { type: 'number', value: '10', min: '0', step: '0.5', inputMode: 'decimal' }),
-    barPct: el('input.campo', { type: 'number', value: '20', min: '0', max: '100', step: '1', inputMode: 'numeric' }),
-    delivered: el('input.campo', { type: 'number', value: '0', min: '0', step: '1', inputMode: 'numeric' })
+    name: input('input.campo', { type: 'text', value: 'Concierto', required: true, maxLength: 120 }),
+    date: input('input.campo', { type: 'date', value: hoy }),
+    price: input('input.campo', { type: 'number', value: '10', min: '0', step: '0.5', inputMode: 'decimal' }),
+    barPct: input('input.campo', { type: 'number', value: '20', min: '0', max: '100', step: '1', inputMode: 'numeric' }),
+    delivered: input('input.campo', { type: 'number', value: '0', min: '0', step: '1', inputMode: 'numeric' })
   };
 
   const formulario = el('form.formulario', {
+    /** @param {SubmitEvent} ev */
     onSubmit: (ev) => {
       ev.preventDefault();
       const eventId = nuevoEventId();
@@ -322,7 +415,11 @@ function pantallaArranque() {
   );
 }
 
-/** El QR no es imprescindible: si la URL fuese enorme, el enlace sigue ahí. */
+/**
+ * El QR no es imprescindible: si la URL fuese enorme, el enlace sigue ahí.
+ * @param {string} enlace
+ * @returns {HTMLElement}
+ */
 function qrDe(enlace) {
   try {
     return el('div.qr', { html: qrSVG(enlace) });
@@ -332,6 +429,12 @@ function qrDe(enlace) {
   }
 }
 
+/**
+ * @param {string} texto
+ * @param {HTMLElement} campo
+ * @param {string|null} [ayuda]
+ * @returns {HTMLElement}
+ */
 function etiquetado(texto, campo, ayuda = null) {
   const id = 'c' + Math.random().toString(36).slice(2, 8);
   campo.id = id;
@@ -342,6 +445,7 @@ function etiquetado(texto, campo, ayuda = null) {
   );
 }
 
+/** @param {string} eventId */
 function pantallaEnlaces(eventId) {
   const enlacePuerta = enlaceDe(eventId, 'door');
   const enlaceMesa = enlaceDe(eventId, 'desk');
@@ -356,7 +460,7 @@ function pantallaEnlaces(eventId) {
           el('h2.subtitulo', { text: 'Puerta' }),
           el('code.enlace', { text: enlacePuerta }),
           el('div.acciones-fila',
-            el('button.btn.btn-secundario', { type: 'button', text: 'Copiar', onClick: () => copiar(enlacePuerta) }),
+            boton('button.btn.btn-secundario', { text: 'Copiar', onClick: () => copiar(enlacePuerta) }),
             el('a.btn.btn-primario', { href: enlacePuerta, text: 'Abrir' })
           ),
           qrDe(enlacePuerta),
@@ -367,7 +471,7 @@ function pantallaEnlaces(eventId) {
           el('h2.subtitulo', { text: 'Tesorería' }),
           el('code.enlace', { text: enlaceMesa }),
           el('div.acciones-fila',
-            el('button.btn.btn-secundario', { type: 'button', text: 'Copiar', onClick: () => copiar(enlaceMesa) }),
+            boton('button.btn.btn-secundario', { text: 'Copiar', onClick: () => copiar(enlaceMesa) }),
             el('a.btn.btn-primario', { href: enlaceMesa, text: 'Abrir' })
           )
         )

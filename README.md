@@ -170,7 +170,8 @@ vacío a la caché local.
 ```
 index.html            arranque y hosts de toast y bottom sheet
 app.js                router de hash, pantallas de arranque y utilidades de UI
-store.js              única capa que habla con Firestore + todos los cálculos
+store.js              única capa que habla con Firestore
+calc.js               cálculos del cuadre: funciones puras, sin Firestore ni DOM
 views/door.js         vista de puerta
 views/desk.js         vista de tesorería
 qr.js                 generador de QR propio (modo byte, nivel M, versiones 1-10)
@@ -180,7 +181,13 @@ manifest.webmanifest  PWA
 sw.js                 service worker
 firestore.rules       reglas de seguridad
 icons/                iconos 192, 512 y maskable
+tests/                unitarios, de navegador y el doble del SDK
+types/                declaraciones para los módulos que vienen por CDN
 ```
+
+`calc.js` está separado de `store.js` a propósito: al no importar nada de
+Firebase se puede testear en Node directamente, sin navegador y sin mocks.
+`store.js` lo reexporta, así que las vistas siguen viendo una única superficie.
 
 Las vistas no hablan con Firestore: reciben el store y llaman a sus acciones.
 Ninguna escritura espera confirmación del servidor, porque sin red esa promesa no
@@ -189,6 +196,68 @@ el listener dispara al instante.
 
 El QR se genera en el repo, sin CDN ni API de imágenes: en el bar puede no haber
 red cuando lo necesites.
+
+## Desarrollo
+
+`package.json` y `node_modules/` son **solo para desarrollar**. Lo que se
+publica en GitHub Pages son los archivos del repo tal cual: la app no tiene
+build step, ni bundler, ni dependencias en tiempo de ejecución más allá del SDK
+de Firebase por CDN.
+
+```bash
+npm install     # herramientas de desarrollo
+npm test        # linter + tipos + unitarios + navegador
+```
+
+Por partes:
+
+| Comando | Qué hace |
+|---|---|
+| `npm run lint` | ESLint sobre app, service worker y tests |
+| `npm run typecheck` | TypeScript en modo `checkJs` sobre los tres proyectos |
+| `npm run test:unit` | Cálculos, CSV, QR y empaquetado (Node, sin navegador) |
+| `npm run test:e2e` | Chromium real, dos pestañas, SDK sustituido por un doble |
+
+### Tipos sin TypeScript
+
+El código es JavaScript y se sirve sin compilar, pero está anotado con JSDoc y
+se comprueba con `tsc --checkJs`. Se tipa igual y lo que corre en el móvil es
+exactamente lo que hay en el repo: a las 21:50 en un bar, eso importa.
+
+Los módulos de Firebase se importan por URL, que TypeScript no sabe resolver.
+`types/firebase-cdn.d.ts` mapea esas URLs al paquete npm, clavado a la misma
+versión. **Si subes la versión de la URL en `store.js`, sube también la de
+`package.json`**: hay un test que lo comprueba.
+
+### Qué cubren los tests
+
+- **Cálculos** (`tests/unit/calc.test.js`): la semántica completa del cuadre.
+  Que "ya pagada" e "invitado" sumen persona y cero euros, que las anuladas se
+  ignoren, que `hasTicket` sea ortogonal al método de pago, y un barrido de
+  precios y porcentajes comprobando que bar + banda siempre suman el facturado
+  sin perder céntimos.
+- **CSV** (`tests/unit/csv.test.js`): BOM, separadores, escapado de notas con
+  punto y coma, orden cronológico e importes.
+- **QR** (`tests/unit/qr.test.js`): las diez versiones **decodificadas con un
+  lector real**, más los patrones de la especificación.
+- **Empaquetado** (`tests/unit/pwa.test.js`): que el manifest sea válido, que
+  las rutas sean relativas, que las reglas prohíban borrar y —el que más
+  disgustos evita— que `sw.js` precachee todos los módulos. Si añades un
+  archivo y olvidas meterlo ahí, la app instalada deja de abrir sin cobertura;
+  este test lo caza antes de llegar al bar.
+- **Navegador** (`tests/e2e/`): los criterios de aceptación, con la puerta y
+  tesorería abiertas a la vez y sincronizando en vivo.
+
+### Lo que los tests NO cubren
+
+La cola de escrituras offline es del SDK de Firestore, y en los tests el SDK
+está sustituido por un doble. `tests/e2e/offline.test.js` comprueba nuestra
+parte (avisar sin estorbar, no bloquear el registro), pero **que tres entradas
+hechas en modo avión lleguen al recuperar señal hay que probarlo en un móvil
+real**. Es el punto que más probablemente falle en el bar.
+
+Tampoco se ejecutan las reglas de Firestore: se comprueba su contenido, no su
+comportamiento. Para eso haría falta el emulador de Firebase.
 
 ## Al publicar cambios
 

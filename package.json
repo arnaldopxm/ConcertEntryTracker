@@ -1,0 +1,36 @@
+{
+  "name": "taquilla",
+  "version": "1.0.0",
+  "description": "PWA de taquilla y cuadre de caja para conciertos",
+  "scripts": {
+    "test": "npm run lint && npm run typecheck && npm run test:unit && npm run test:e2e",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.sw.json && tsc -p tsconfig.tests.json",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:e2e": "node --test --test-timeout=240000 tests/e2e/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arnaldopxm/ConcertEntryTracker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/arnaldopxm/ConcertEntryTracker/issues"
+  },
+  "homepage": "https://github.com/arnaldopxm/ConcertEntryTracker#readme",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "firebase": "10.12.2",
+    "globals": "^17.11.0",
+    "jsqr": "^1.4.0",
+    "playwright": "^1.62.1",
+    "qrcode-generator": "^2.0.4",
+    "typescript": "^7.0.2"
+  },
+  "type": "module",
+  "private": "true"
+}

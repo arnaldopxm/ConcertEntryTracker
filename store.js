@@ -1,7 +1,9 @@
+// @ts-check
 // store.js — única capa que habla con Firestore.
 //
 // Las vistas no importan nada de firebase: piden estado a openEvent() y llaman
-// a sus acciones. Todos los cálculos derivados viven aquí, en computeTotals().
+// a sus acciones. Los cálculos derivados viven en calc.js y se reexportan aquí,
+// para que la superficie que ven las vistas siga siendo una sola.
 //
 // Nota importante sobre escrituras: NINGUNA acción hace await de la promesa de
 // Firestore. Sin red, esas promesas no se resuelven hasta que vuelve la señal,
@@ -30,22 +32,48 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 import { firebaseConfig, configPendiente } from './firebase-config.js';
+import { computeTotals, num, clamp, talonarioVacio, METODOS } from './calc.js';
 
-export const METODOS = ['cash', 'bizum', 'already_paid', 'guest'];
+export {
+  METODOS,
+  ETIQUETA_METODO,
+  computeTotals,
+  talonarioVacio,
+  euros,
+  toCSV
+} from './calc.js';
 
-export const ETIQUETA_METODO = {
-  cash: 'Efectivo',
-  bizum: 'Bizum',
-  already_paid: 'Ya pagada',
-  guest: 'Invitado'
-};
+/**
+ * @typedef {import('./calc.js').Evento} Evento
+ * @typedef {import('./calc.js').Entry} Entry
+ * @typedef {import('./calc.js').Metodo} Metodo
+ * @typedef {import('./calc.js').Talonario} Talonario
+ * @typedef {import('./calc.js').Totales} Totales
+ */
 
+/**
+ * @typedef {object} EstadoEvento
+ * @property {string} eventId
+ * @property {boolean} cargando
+ * @property {boolean} existe
+ * @property {Evento|null} evento
+ * @property {Entry[]} entries
+ * @property {Totales} totales
+ * @property {boolean} online     Hay red según el navegador.
+ * @property {number} pendientes  Escrituras aún sin confirmar por el servidor.
+ * @property {boolean} desdeCache
+ * @property {unknown} error
+ */
+
+/** @type {Promise<{db: import('firebase/firestore').Firestore, auth: import('firebase/auth').Auth}>|null} */
 let _init = null;
-let _db = null;
-let _auth = null;
+/** @type {import('firebase/firestore').Firestore} */
+let _db;
+/** @type {import('firebase/auth').Auth} */
+let _auth;
 let _hayAuth = false;
 
-/** Arranca Firebase una sola vez. Devuelve { db, auth }. */
+/** Arranca Firebase una sola vez. */
 export function initApp() {
   if (_init) return _init;
 
@@ -91,14 +119,30 @@ export function initApp() {
   return _init;
 }
 
-async function intentarLogin() {
-  if (_hayAuth) return;
-  try {
-    await signInAnonymously(_auth);
-    _hayAuth = true;
-  } catch (err) {
-    console.warn('No se pudo iniciar sesión anónima (¿sin red?):', err);
-  }
+/** @type {Promise<void>|null} */
+let _loginEnCurso = null;
+
+/**
+ * Pide sesión anónima como mucho una vez a la vez. El evento 'online' puede
+ * dispararse varias veces seguidas al recuperar cobertura y no queremos abrir
+ * tres sesiones en paralelo.
+ */
+function intentarLogin() {
+  if (_hayAuth) return Promise.resolve();
+  if (_loginEnCurso) return _loginEnCurso;
+
+  _loginEnCurso = signInAnonymously(_auth)
+    .then(() => {
+      _hayAuth = true;
+    })
+    .catch((err) => {
+      console.warn('No se pudo iniciar sesión anónima (¿sin red?):', err);
+    })
+    .finally(() => {
+      _loginEnCurso = null;
+    });
+
+  return _loginEnCurso;
 }
 
 export function haySesion() {
@@ -116,39 +160,39 @@ export function nuevoEventId() {
   return id;
 }
 
-export function talonarioVacio() {
-  return { delivered: 0, soldCash: 0, soldBizum: 0, returned: 0 };
-}
-
 /**
  * Crea el documento del evento. No espera confirmación del servidor: la caché
  * local ya lo tiene y la navegación puede seguir.
+ *
+ * @param {string} eventId
+ * @param {{name: string, date: string, price: unknown, barPct: unknown, tickets?: Partial<Talonario>}} datos
  */
 export function crearEvento(eventId, { name, date, price, barPct, tickets }) {
   const ref = doc(_db, 'events', eventId);
-  const datos = {
+  const documento = {
     name: String(name || '').slice(0, 120),
     date: String(date || '').slice(0, 40),
-    price: num(price),
+    price: Math.max(0, num(price)),
     barPct: clamp(num(barPct), 0, 100),
     tickets: { ...talonarioVacio(), ...(tickets || {}) },
     createdAt: Timestamp.now(),
     closedAt: null
   };
-  setDoc(ref, datos).catch((err) => console.error('Error creando evento:', err));
-  return datos;
+  setDoc(ref, documento).catch((err) => console.error('Error creando evento:', err));
+  return documento;
 }
 
 /**
  * Abre un evento: suscribe a su documento y a toda la subcolección de entries,
  * recalcula los totales en cada cambio y notifica a quien escuche.
  *
- * Devuelve un objeto con las acciones y un subscribe(fn) que entrega el estado
- * completo y devuelve la función para desuscribirse.
+ * @param {string} eventId
  */
 export function openEvent(eventId) {
+  /** @type {Set<(estado: EstadoEvento) => void>} */
   const oyentes = new Set();
 
+  /** @type {EstadoEvento} */
   const estado = {
     eventId,
     cargando: true,
@@ -233,6 +277,7 @@ export function openEvent(eventId) {
 
     getState: () => estado,
 
+    /** @param {(estado: EstadoEvento) => void} fn */
     subscribe(fn) {
       oyentes.add(fn);
       fn(estado);
@@ -242,22 +287,31 @@ export function openEvent(eventId) {
     /**
      * Registra una persona. Devuelve el id del documento de inmediato para que
      * el botón Deshacer del toast pueda anularlo sin esperar al servidor.
+     *
+     * @param {{method: Metodo, hasTicket: boolean, note?: string|null}} datos
+     * @returns {string}
      */
     addEntry({ method, hasTicket, note = null }) {
+      // Guardia en tiempo de ejecución además del tipo: un método inválido lo
+      // rechazarían las reglas en silencio y la entrada desaparecería sola.
       if (!METODOS.includes(method)) throw new Error('Método desconocido: ' + method);
       const ref = doc(collection(_db, 'events', eventId, 'entries'));
-      const datos = {
+      const documento = {
         ts: Timestamp.now(),
         method,
         hasTicket: !!hasTicket,
         note: note ? String(note).slice(0, 200) : null,
         voided: false
       };
-      setDoc(ref, datos).catch((err) => console.error('Error registrando entrada:', err));
+      setDoc(ref, documento).catch((err) => console.error('Error registrando entrada:', err));
       return ref.id;
     },
 
-    /** Anulación lógica. Nunca se borra el documento. */
+    /**
+     * Anulación lógica. Nunca se borra el documento.
+     * @param {string} entryId
+     * @param {boolean} voided
+     */
     setVoided(entryId, voided) {
       const ref = doc(_db, 'events', eventId, 'entries', entryId);
       updateDoc(ref, { voided: !!voided }).catch((err) =>
@@ -265,8 +319,12 @@ export function openEvent(eventId) {
       );
     },
 
-    /** Cambia configuración del evento (nombre, precio, %, talonario…). */
+    /**
+     * Cambia configuración del evento (nombre, precio, %, talonario…).
+     * @param {Record<string, unknown>} patch
+     */
     updateConfig(patch) {
+      /** @type {Record<string, unknown>} */
       const limpio = {};
       if ('name' in patch) limpio.name = String(patch.name).slice(0, 120);
       if ('date' in patch) limpio.date = String(patch.date).slice(0, 40);
@@ -297,6 +355,12 @@ export function openEvent(eventId) {
   };
 }
 
+/** @typedef {ReturnType<typeof openEvent>} Store */
+
+/**
+ * @param {Record<string, any>} d
+ * @returns {Evento}
+ */
 function normalizarEvento(d) {
   return {
     name: d.name || '',
@@ -309,6 +373,11 @@ function normalizarEvento(d) {
   };
 }
 
+/**
+ * @param {string} id
+ * @param {Record<string, any>} d
+ * @returns {Entry}
+ */
 function normalizarEntry(id, d) {
   return {
     id,
@@ -320,146 +389,15 @@ function normalizarEntry(id, d) {
   };
 }
 
+/**
+ * @param {unknown} v
+ * @returns {Date|null}
+ */
 function aFecha(v) {
   if (!v) return null;
-  if (typeof v.toDate === 'function') return v.toDate();
   if (v instanceof Date) return v;
-  return null;
-}
-
-function num(v) {
-  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
-}
-
-function clamp(n, min, max) {
-  return Math.min(max, Math.max(min, n));
-}
-
-/** Redondeo a céntimos, evitando la basura del coma flotante. */
-export function euros(n) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-/**
- * Todos los cálculos del cuadre. Función pura: mismo evento y mismas entries,
- * mismo resultado. Ignora siempre las entries anuladas.
- */
-export function computeTotals(evento, entries) {
-  const price = evento ? num(evento.price) : 0;
-  const barPct = evento ? num(evento.barPct) : 0;
-  const t = evento ? evento.tickets : talonarioVacio();
-
-  const vivas = (entries || []).filter((e) => !e.voided);
-
-  const nCash = vivas.filter((e) => e.method === 'cash').length;
-  const nBizum = vivas.filter((e) => e.method === 'bizum').length;
-  const nYaPagada = vivas.filter((e) => e.method === 'already_paid').length;
-  const nInvitado = vivas.filter((e) => e.method === 'guest').length;
-  const nConEntrada = vivas.filter((e) => e.hasTicket).length;
-
-  const ingresosPreventa = euros((t.soldCash + t.soldBizum) * price);
-  const ingresosPuerta = euros((nCash + nBizum) * price);
-  const facturado = euros(ingresosPreventa + ingresosPuerta);
-
-  const efectivoTotal = euros(t.soldCash * price + nCash * price);
-  const bizumTotal = euros(t.soldBizum * price + nBizum * price);
-
-  const corteBar = euros(facturado * (barPct / 100));
-  const paraBanda = euros(facturado - corteBar);
-
-  const entradasEnCirculacion = t.delivered - t.returned;
-  const entradasRestantes = entradasEnCirculacion - nConEntrada;
-  const pendienteDeCobro = euros(
-    (t.delivered - t.returned - t.soldCash - t.soldBizum) * price
-  );
-
-  return {
-    price,
-    barPct,
-    conteos: {
-      cash: nCash,
-      bizum: nBizum,
-      already_paid: nYaPagada,
-      guest: nInvitado,
-      conEntrada: nConEntrada,
-      anuladas: (entries || []).length - vivas.length
-    },
-    asistentes: vivas.length,
-    ingresosPreventa,
-    ingresosPuerta,
-    facturado,
-    efectivoTotal,
-    bizumTotal,
-    corteBar,
-    paraBanda,
-    entradasEnCirculacion,
-    entradasRestantes,
-    pendienteDeCobro
-  };
-}
-
-/**
- * CSV del cuadre completo: movimientos y resumen. Separador punto y coma y BOM
- * para que Excel en español lo abra bien de un doble clic.
- */
-export function toCSV(evento, entries, totales) {
-  const esc = (v) => {
-    const s = v === null || v === undefined ? '' : String(v);
-    return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  const linea = (campos) => campos.map(esc).join(';');
-  const dinero = (n) => euros(n).toFixed(2).replace('.', ',');
-
-  const filas = [];
-  filas.push(linea(['Movimientos']));
-  filas.push(linea(['Fecha', 'Hora', 'Método', 'Entrada física', 'Importe', 'Nota', 'Anulada']));
-
-  const cronologico = [...entries].sort((a, b) => (a.ts?.getTime() || 0) - (b.ts?.getTime() || 0));
-  for (const e of cronologico) {
-    const cobra = e.method === 'cash' || e.method === 'bizum';
-    filas.push(
-      linea([
-        e.ts ? e.ts.toLocaleDateString('es-ES') : '',
-        e.ts ? e.ts.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '',
-        ETIQUETA_METODO[e.method] || e.method,
-        e.hasTicket ? 'Sí' : 'No',
-        e.voided ? dinero(0) : dinero(cobra ? totales.price : 0),
-        e.note || '',
-        e.voided ? 'Sí' : 'No'
-      ])
-    );
+  if (typeof v === 'object' && 'toDate' in v && typeof v.toDate === 'function') {
+    return v.toDate();
   }
-
-  filas.push('');
-  filas.push(linea(['Resumen']));
-  filas.push(linea(['Evento', evento.name]));
-  filas.push(linea(['Fecha', evento.date]));
-  filas.push(linea(['Precio entrada', dinero(totales.price)]));
-  filas.push(linea(['Asistentes', totales.asistentes]));
-  filas.push('');
-  filas.push(linea(['Entradas entregadas', evento.tickets.delivered]));
-  filas.push(linea(['Entradas cobradas en efectivo (preventa)', evento.tickets.soldCash]));
-  filas.push(linea(['Entradas cobradas por bizum (preventa)', evento.tickets.soldBizum]));
-  filas.push(linea(['Entradas devueltas', evento.tickets.returned]));
-  filas.push(linea(['Entradas en circulación', totales.entradasEnCirculacion]));
-  filas.push(linea(['Entradas sin aparecer', totales.entradasRestantes]));
-  filas.push(linea(['Pendiente de cobro', dinero(totales.pendienteDeCobro)]));
-  filas.push('');
-  filas.push(linea(['Registradas en puerta: efectivo', totales.conteos.cash]));
-  filas.push(linea(['Registradas en puerta: bizum', totales.conteos.bizum]));
-  filas.push(linea(['Registradas en puerta: ya pagada', totales.conteos.already_paid]));
-  filas.push(linea(['Registradas en puerta: invitado', totales.conteos.guest]));
-  filas.push(linea(['Anuladas', totales.conteos.anuladas]));
-  filas.push('');
-  filas.push(linea(['Ingresos preventa', dinero(totales.ingresosPreventa)]));
-  filas.push(linea(['Ingresos puerta', dinero(totales.ingresosPuerta)]));
-  filas.push(linea(['Facturado', dinero(totales.facturado)]));
-  filas.push(linea(['Efectivo total', dinero(totales.efectivoTotal)]));
-  filas.push(linea(['Bizum total', dinero(totales.bizumTotal)]));
-  filas.push(linea([`Corte del bar (${totales.barPct}%)`, dinero(totales.corteBar)]));
-  filas.push(linea(['Para la banda', dinero(totales.paraBanda)]));
-  filas.push(linea(['Cierre de caja', evento.closedAt ? evento.closedAt.toLocaleString('es-ES') : 'Sin cerrar']));
-
-  return '﻿' + filas.join('\r\n');
+  return null;
 }

@@ -1,10 +1,15 @@
+// @ts-check
 // views/door.js — vista de puerta.
 //
 // Una pantalla, sin scroll, sin menús y sin dinero: aquí solo se cuenta gente.
 // Dos toques por persona como máximo.
 
-import { el, toast, openSheet, closeSheet, vibrar } from '../app.js';
+import { el, boton, input, toast, openSheet, closeSheet, vibrar } from '../app.js';
 
+/** @typedef {import('../store.js').Store} Store */
+/** @typedef {import('../calc.js').Metodo} Metodo */
+
+/** @type {Record<Metodo, string>} */
 const CONFIRMACION = {
   cash: 'Registrado en efectivo',
   bizum: 'Registrado en bizum',
@@ -12,12 +17,18 @@ const CONFIRMACION = {
   guest: 'Registrado como invitado'
 };
 
+/**
+ * @param {HTMLElement} raiz
+ * @param {Store} store
+ * @returns {() => void} desmontar
+ */
 export function mount(raiz, store) {
   const contador = el('div.contador', { text: '0' });
   const talonario = el('div.contador-pie', { text: ' ' });
   const barraRed = el('div.barra-red', { hidden: true });
   const avisoCerrado = el('div.barra-cerrado', { hidden: true, text: 'Caja cerrada. Ya no se registran entradas.' });
 
+  /** @type {Record<Metodo, HTMLButtonElement>} */
   const botones = {
     cash: botonPad('Efectivo', 'cash'),
     bizum: botonPad('Bizum', 'bizum'),
@@ -42,9 +53,10 @@ export function mount(raiz, store) {
   document.body.classList.add('modo-puerta');
 
   let estado = store.getState();
+  /** @type {number|null} */
   let ultimoTotal = null;
 
-  const desuscribir = store.subscribe((nuevo) => {
+  const desuscribir = store.subscribe(/** @param {import('../store.js').EstadoEvento} nuevo */ (nuevo) => {
     estado = nuevo;
     pintar();
   });
@@ -98,11 +110,13 @@ export function mount(raiz, store) {
     for (const boton of Object.values(botones)) boton.disabled = cerrado || !estado.existe;
   }
 
+  /**
+   * @param {string} texto
+   * @param {string} clase
+   * @returns {HTMLButtonElement}
+   */
   function botonPad(texto, clase) {
-    const boton = el('button.pad-btn.pad-' + clase, { type: 'button' },
-      el('span.pad-texto', { text: texto })
-    );
-    return boton;
+    return boton('button.pad-btn.pad-' + clase, {}, el('span.pad-texto', { text: texto }));
   }
 
   botones.cash.addEventListener('click', () => preguntarEntrada('cash'));
@@ -115,18 +129,17 @@ export function mount(raiz, store) {
   botones.guest.addEventListener('click', () => registrar('guest', false));
 
   /** Paso 1: la única pregunta del flujo. */
+  /** @param {Metodo} metodo */
   function preguntarEntrada(metodo) {
     const sinTalonario = estado.totales.entradasRestantes <= 0;
 
     const contenido = el('div.sheet-contenido',
       el('div.sheet-botones',
-        el('button.btn-sheet.btn-sheet-si', {
-          type: 'button',
+        boton('button.btn-sheet.btn-sheet-si', {
           text: 'Sí, traía entrada',
           onClick: () => (sinTalonario ? avisarTalonario(metodo, true) : registrar(metodo, true))
         }),
-        el('button.btn-sheet.btn-sheet-no', {
-          type: 'button',
+        boton('button.btn-sheet.btn-sheet-no', {
           text: 'No traía',
           onClick: () => registrar(metodo, false)
         })
@@ -140,16 +153,19 @@ export function mount(raiz, store) {
    * Paso 2, solo cuando el talonario ya no da para más. Avisa, pide nota y
    * deja continuar. Nunca bloquea: nadie se queda fuera por culpa de la app.
    */
+  /**
+   * @param {Metodo} metodo
+   * @param {boolean} hasTicket
+   */
   function avisarTalonario(metodo, hasTicket) {
-    const nota = el('input.campo', {
+    const nota = input('input.campo', {
       type: 'text',
       maxLength: 200,
       placeholder: 'Ej.: entrada repetida, la trajo un amigo…',
       'aria-label': 'Nota'
     });
 
-    const confirmar = el('button.btn-sheet.btn-sheet-peligro', {
-      type: 'button',
+    const confirmar = boton('button.btn-sheet.btn-sheet-peligro', {
       text: 'Registrar igualmente',
       disabled: true,
       onClick: () => registrar(metodo, hasTicket, nota.value.trim())
@@ -167,7 +183,7 @@ export function mount(raiz, store) {
       nota,
       el('div.sheet-botones',
         confirmar,
-        el('button.btn-sheet.btn-sheet-no', { type: 'button', text: 'Cancelar', onClick: () => closeSheet() })
+        boton('button.btn-sheet.btn-sheet-no', { text: 'Cancelar', onClick: () => closeSheet() })
       )
     );
 
@@ -175,6 +191,11 @@ export function mount(raiz, store) {
     setTimeout(() => nota.focus(), 50);
   }
 
+  /**
+   * @param {Metodo} metodo
+   * @param {boolean} hasTicket
+   * @param {string|null} [nota]
+   */
   function registrar(metodo, hasTicket, nota = null) {
     if (estado.evento && estado.evento.closedAt) {
       closeSheet();
