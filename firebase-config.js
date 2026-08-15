@@ -8,12 +8,12 @@
 // autoriza nada por sí sola. La seguridad real vive en firestore.rules.
 
 export const firebaseConfig = {
-  apiKey: 'PEGA_AQUI_apiKey',
-  authDomain: 'PEGA_AQUI_authDomain',
-  projectId: 'PEGA_AQUI_projectId',
-  storageBucket: 'PEGA_AQUI_storageBucket',
-  messagingSenderId: 'PEGA_AQUI_messagingSenderId',
-  appId: 'PEGA_AQUI_appId'
+  apiKey: 'AIzaSyCe6D06IaTrj8wzZE7FX1X2kneX-ykCbWs',
+  authDomain: 'taquilla-18de2.firebaseapp.com',
+  projectId: 'taquilla-18de2',
+  storageBucket: 'taquilla-18de2.firebasestorage.app',
+  messagingSenderId: '677117565266',
+  appId: '1:677117565266:web:6cd927c1bfaef50f20828b'
 };
 
 // Detecta si el archivo sigue sin rellenar, para avisar en pantalla en vez de
